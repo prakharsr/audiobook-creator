@@ -258,6 +258,9 @@ def merge_chapters_to_m4b(book_path, chapter_files):
     published_date = escape_metadata(metadata.get("Published", ""))
     comments = escape_metadata(metadata.get("Comments", ""))
     
+    # ensure generated_audiobooks exists
+    os.makedirs("generated_audiobooks", exist_ok=True)
+    
     # Generate chapter metadata
     generate_chapters_file(chapter_files, "chapters.txt")
 
