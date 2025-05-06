@@ -48,7 +48,7 @@ nvidia-curand-cu12==10.3.5.147
 nvidia-cusolver-cu12==11.6.1.9
 nvidia-cusparse-cu12==12.3.1.170
 nvidia-cusparselt-cu12==0.6.2
-nvidia-nccl-cu12==2.21.5
+nvidia-nccl-cu12==2.21.5; sys_platform == 'linux'
 nvidia-nvjitlink-cu12==12.4.127
 nvidia-nvtx-cu12==12.4.127
 olefile==0.47
@@ -96,7 +96,8 @@ tomlkit==0.13.2
 torch==2.6.0
 tqdm==4.67.1
 transformers==4.49.0
-triton==3.2.0
+triton==3.2.0; sys_platform != 'win32'
+triton-windows==3.2.0.post19; sys_platform == 'win32'
 typer==0.15.2
 typing-extensions==4.12.2
 tzdata==2025.1
