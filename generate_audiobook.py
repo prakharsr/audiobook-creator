@@ -39,7 +39,7 @@ from utils.audiobook_utils import (
     merge_chapters_to_standard_audio_file,
     add_silence_to_audio_file_by_appending_pre_generated_silence,
 )
-from utils.check_if_kokoro_api_is_up import check_if_kokoro_api_is_up
+from utils.check_tts_api import check_tts_api
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -706,8 +706,20 @@ async def generate_audio_with_multiple_voices(
 async def process_audiobook_generation(
     voice_option, narrator_gender, output_format, book_path
 ):
+    # Select narrator voice string based on narrator_gender and MODEL
+    if narrator_gender == "male":
+        if MODEL == "kokoro":
+            narrator_voice = "am_puck"
+        else:
+            narrator_voice = "leo"
+    else:
+        if MODEL == "kokoro":
+            narrator_voice = "af_heart"
+        else:
+            narrator_voice = "tara"
+
     is_kokoro_api_up, message = await check_tts_api(
-        async_openai_client, MODEL, VOICE_MAP[narrator_gender]
+        async_openai_client, MODEL, narrator_voice
     )
 
     if not is_kokoro_api_up:
