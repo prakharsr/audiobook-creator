@@ -27,6 +27,7 @@ load_dotenv()
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8880/v1")
 API_KEY = os.environ.get("API_KEY", "not-needed")
+MODEL = os.environ.get("MODEL", "kokoro")
 
 os.makedirs("audio_samples", exist_ok=True)
 
@@ -61,7 +62,7 @@ if gen_for_all_combinations == "yes":
     ) as overall_pbar:
         for voice in all_voices_combinations:
             with client.audio.speech.with_streaming_response.create(
-                model="kokoro",
+                model=MODEL,
                 voice=voice,
                 response_format="aac",  # Ensuring format consistency
                 speed=0.85,
@@ -76,7 +77,7 @@ else:
     ) as overall_pbar:
         for voice in voices:
             with client.audio.speech.with_streaming_response.create(
-                model="kokoro",
+                model=MODEL,
                 voice=voice,
                 response_format="aac",  # Ensuring format consistency
                 speed=0.85,

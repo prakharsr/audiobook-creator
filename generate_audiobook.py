@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import shutil
+from openai import OpenAI, AsyncOpenAI
 from tqdm import tqdm
 import json
 import os
@@ -25,6 +26,7 @@ import re
 from word2number import w2n
 import time
 import sys
+from utils.check_tts_api import check_tts_api
 from utils.run_shell_commands import (
     check_if_ffmpeg_is_installed,
     check_if_calibre_is_installed,
@@ -37,29 +39,22 @@ from utils.audiobook_utils import (
     merge_chapters_to_standard_audio_file,
     add_silence_to_audio_file_by_appending_pre_generated_silence,
 )
-from utils.check_tts_api import check_if_api_is_up
+from utils.check_if_kokoro_api_is_up import check_if_kokoro_api_is_up
 from dotenv import load_dotenv
-import os
-from utils.run_shell_commands import (
-    check_if_ffmpeg_is_installed,
-    check_if_calibre_is_installed,
-)
-from utils.file_utils import read_json, empty_directory
-from utils.audiobook_utils import (
-    merge_chapters_to_m4b,
-    convert_audio_file_formats,
-    add_silence_to_audio_file_by_reencoding_using_ffmpeg,
-    merge_chapters_to_standard_audio_file,
-    add_silence_to_audio_file_by_appending_pre_generated_silence,
-)
-from utils.check_tts_api import check_if_api_is_up
 
 load_dotenv()
 
-ORPHEUS_BASE_URL = os.environ.get("ORPHEUS_BASE_URL", "https://api.orpheus.tts/v1")
-ORPHEUS_API_KEY = os.environ.get("ORPHEUS_API_KEY", "")
-ORPHEUS_MAX_PARALLEL_REQUESTS = int(os.environ.get("ORPHEUS_MAX_PARALLEL_REQUESTS", 3))
-ORPHEUS_VOICE_MAP = {"male": "en-US-JasonNeural", "female": "en-US-SophiaNeural"}
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:8880/v1")
+API_KEY = os.environ.get("API_KEY", "not-needed")
+MODEL = os.environ.get("MODEL", "kokoro")
+MAX_PARALLEL_REQUESTS_BATCH_SIZE = int(
+    os.environ.get("MAX_PARALLEL_REQUESTS_BATCH_SIZE", 2)
+)
+VOICE_MAP = (
+    read_json("static_files/kokoro_voice_map_male_narrator.json")
+    if MODEL == "kokoro"
+    else read_json("static_files/orpheus_voice_map_male_narrator.json")
+)
 
 os.makedirs("audio_samples", exist_ok=True)
 
@@ -188,11 +183,19 @@ async def generate_audio_with_single_voice(
     dialogue_voice = ""  # voice to be used for dialogue
 
     if narrator_gender == "male":
-        narrator_voice = "am_puck"
-        dialogue_voice = "af_alloy+am_puck"
+        if MODEL == "kokoro":
+            narrator_voice = "am_puck"
+            dialogue_voice = "af_alloy+am_puck"
+        else:
+            narrator_voice = "leo"
+            dialogue_voice = "dan+leo"
     else:
-        narrator_voice = "af_heart"
-        dialogue_voice = "af_sky"
+        if MODEL == "kokoro":
+            narrator_voice = "af_heart"
+            dialogue_voice = "af_sky"
+        else:
+            narrator_voice = "tara"
+            dialogue_voice = "leah+tara"
 
     # Setup directories
     temp_audio_dir = "temp_audio"
@@ -243,7 +246,7 @@ async def generate_audio_with_single_voice(
 
                 # Generate audio for the part
                 async with async_openai_client.audio.speech.with_streaming_response.create(
-                    model="kokoro",
+                    model=MODEL,
                     voice=voice_to_speak_in,
                     response_format="aac",
                     speed=0.85,
@@ -452,9 +455,15 @@ async def generate_audio_with_multiple_voices(
     voice_map = None
 
     if narrator_gender == "male":
-        voice_map = read_json("static_files/voice_map_male_narrator.json")
+        if MODEL == "kokoro":
+            voice_map = read_json("static_files/kokoro_voice_map_male_narrator.json")
+        else:
+            voice_map = read_json("static_files/orpheus_voice_map_male_narrator.json")
     else:
-        voice_map = read_json("static_files/voice_map_female_narrator.json")
+        if MODEL == "kokoro":
+            voice_map = read_json("static_files/kokoro_voice_map_female_narrator.json")
+        else:
+            voice_map = read_json("static_files/orpheus_voice_map_female_narrator.json")
 
     narrator_voice = find_voice_for_gender_score(
         "narrator", character_gender_map, voice_map
@@ -521,7 +530,7 @@ async def generate_audio_with_multiple_voices(
 
                 # Generate audio for the part
                 async with async_openai_client.audio.speech.with_streaming_response.create(
-                    model="kokoro",
+                    model=MODEL,
                     voice=voice_to_speak_in,
                     response_format="aac",
                     speed=0.85,
@@ -697,221 +706,11 @@ async def generate_audio_with_multiple_voices(
 async def process_audiobook_generation(
     voice_option, narrator_gender, output_format, book_path
 ):
-    async def generate_audio_with_single_voice_orpheus(
-        output_format, narrator_gender, generate_m4b_audiobook_file=False, book_path=""
-    ):
-        """
-        Generate an audiobook using Orpheus-FastAPI for a single voice.
-        """
-        # Read the text from the file
-        with open("converted_book.txt", "r", encoding="utf-8") as f:
-            text = f.read()
-        lines = text.split("\n")
+    is_kokoro_api_up, message = await check_tts_api(
+        async_openai_client, MODEL, VOICE_MAP[narrator_gender]
+    )
 
-        # Filter out empty lines
-        lines = [line.strip() for line in lines if line.strip()]
-
-        # Setup directories
-        temp_audio_dir = "temp_audio"
-        temp_line_audio_dir = os.path.join(temp_audio_dir, "line_segments")
-
-        empty_directory(temp_audio_dir)
-
-        os.makedirs(temp_audio_dir, exist_ok=True)
-        os.makedirs(temp_line_audio_dir, exist_ok=True)
-
-        # Batch processing parameters
-        semaphore = asyncio.Semaphore(ORPHEUS_MAX_PARALLEL_REQUESTS)
-
-        # Initial setup for chapters
-        chapter_index = 1
-        current_chapter_audio = f"Introduction.aac"
-        chapter_files = []
-
-        # First pass: Generate audio for each line independently
-        total_size = len(lines)
-        progress_counter = 0
-        progress_bar = tqdm(
-            total=total_size, unit="line", desc="Audio Generation Progress"
-        )
-
-        async def process_single_line(line_index, line):
-            async with semaphore:
-                nonlocal progress_counter
-
-                if not line:
-                    return None
-
-                # Generate audio for the line
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        f"{ORPHEUS_BASE_URL}/tts",
-                        headers={"Authorization": f"Bearer {ORPHEUS_API_KEY}"},
-                        json={
-                            "text": line,
-                            "voice": ORPHEUS_VOICE_MAP[narrator_gender],
-                            "format": "mp3",
-                        },
-                    )
-                    audio_data = response.content
-
-                # Write this line's audio to a temporary file
-                line_audio_path = os.path.join(
-                    temp_line_audio_dir, f"line_{line_index:06d}.mp3"
-                )
-                with open(line_audio_path, "wb") as line_file:
-                    line_file.write(audio_data)
-
-                # Update progress bar
-                progress_bar.update(1)
-                progress_counter += 1
-
-                return {
-                    "index": line_index,
-                    "is_chapter_heading": check_if_chapter_heading(line),
-                    "line": line,
-                }
-
-        # Create tasks and store them with their index for result collection
-        tasks = []
-        task_to_index = {}
-        for i, line in enumerate(lines):
-            task = asyncio.create_task(process_single_line(i, line))
-            tasks.append(task)
-            task_to_index[task] = i
-
-        # Initialize results_all list
-        results_all = [None] * len(lines)
-
-        # Process tasks with progress updates
-        last_reported = -1
-        while tasks:
-            done, pending = await asyncio.wait(
-                tasks, return_when=asyncio.FIRST_COMPLETED
-            )
-
-            # Store results as tasks complete
-            for completed_task in done:
-                idx = task_to_index[completed_task]
-                results_all[idx] = completed_task.result()
-
-            tasks = list(pending)
-
-            # Only yield if the counter has changed
-            if progress_counter > last_reported:
-                last_reported = progress_counter
-                percent = (progress_counter / total_size) * 100
-                yield f"Generating audiobook. Progress: {percent:.1f}%"
-
-        # All tasks have completed at this point and results_all is populated
-        results = [r for r in results_all if r is not None]  # Filter out empty lines
-
-        progress_bar.close()
-
-        # Second pass: Organize by chapters
-        chapter_organization_bar = tqdm(
-            total=len(results), unit="result", desc="Organizing Chapters"
-        )
-
-        for result in sorted(results, key=lambda x: x["index"]):
-            # Check if this is a chapter heading
-            if result["is_chapter_heading"]:
-                chapter_index += 1
-                current_chapter_audio = f"{sanitize_filename(result['line'])}.mp3"
-
-            if current_chapter_audio not in chapter_files:
-                chapter_files.append(current_chapter_audio)
-                chapter_line_map[current_chapter_audio] = []
-
-            # Add this line index to the chapter
-            chapter_line_map[current_chapter_audio].append(result["index"])
-            chapter_organization_bar.update(1)
-
-        chapter_organization_bar.close()
-        yield "Organizing audio by chapters complete"
-
-        # Third pass: Concatenate audio files for each chapter in order
-        chapter_assembly_bar = tqdm(
-            total=len(chapter_files), unit="chapter", desc="Assembling Chapters"
-        )
-
-        for chapter_file in chapter_files:
-            chapter_path = os.path.join(temp_audio_dir, chapter_file)
-
-            with open(chapter_path, "wb") as chapter_output:
-                # Create progress bar for lines in this chapter
-                line_assembly_bar = tqdm(
-                    total=len(chapter_line_map[chapter_file]),
-                    unit="line",
-                    desc=f"Assembling {chapter_file[:20]}...",
-                )
-
-                # Process each line in the correct order
-                for line_index in sorted(chapter_line_map[chapter_file]):
-                    line_audio_path = os.path.join(
-                        temp_line_audio_dir, f"line_{line_index:06d}.mp3"
-                    )
-
-                    # Read the line audio and append it to the chapter file
-                    with open(line_audio_path, "rb") as line_input:
-                        chapter_output.write(line_input.read())
-
-                    line_assembly_bar.update(1)
-
-                line_assembly_bar.close()
-
-            chapter_assembly_bar.update(1)
-            yield f"Assembled chapter: {chapter_file}"
-
-        chapter_assembly_bar.close()
-
-        # Post-processing steps
-        post_processing_bar = tqdm(
-            total=len(chapter_files) * 2, unit="task", desc="Post Processing"
-        )
-
-        # Add silence to each chapter file
-        for chapter in chapter_files:
-            add_silence_to_audio_file_by_appending_pre_generated_silence(
-                temp_audio_dir, chapter
-            )
-            post_processing_bar.update(1)
-            yield f"Added silence to chapter: {chapter}"
-
-        m4a_chapter_files = []
-
-        # Convert all chapter files to M4A format
-        for chapter in chapter_files:
-            chapter_name = chapter.split(".")[0]
-            m4a_chapter_files.append(f"{chapter_name}.m4a")
-            # Convert to M4A as raw MP3 have problems with timestamps and metadata
-            convert_audio_file_formats("mp3", "m4a", temp_audio_dir, chapter_name)
-            post_processing_bar.update(1)
-            yield f"Converted chapter to M4A: {chapter_name}"
-
-        post_processing_bar.close()
-
-        # Clean up temp line audio files
-        shutil.rmtree(temp_line_audio_dir)
-        yield "Cleaned up temporary files"
-
-        if generate_m4b_audiobook_file:
-            # Merge all chapter files into a final m4b audiobook
-            yield "Creating M4B audiobook file..."
-            merge_chapters_to_m4b(book_path, m4a_chapter_files)
-            yield "M4B audiobook created successfully"
-        else:
-            # Merge all chapter files into a standard M4A audiobook
-            yield "Creating final audiobook..."
-            merge_chapters_to_standard_audio_file(m4a_chapter_files)
-            convert_audio_file_formats(
-                "m4a", output_format, "generated_audiobooks", "audiobook"
-            )
-            yield f"Audiobook in {output_format} format created successfully"
-
-    is_api_up, message = await check_if_api_is_up(async_openai_client)
-
-    if not is_api_up:
+    if not is_kokoro_api_up:
         raise Exception(message)
 
     generate_m4b_audiobook_file = False
@@ -954,7 +753,7 @@ async def main():
     # Prompt user for voice selection
     print("\n🎙️ **Audiobook Voice Selection**")
     voice_option = input(
-        "🔹 Enter **1** for **Single Voice** (Kokoro), **2** for **Multiple Voices** (Kokoro), or **3** for **Single Voice** (Orpheus): "
+        "🔹 Enter **1** for **Single Voice** or **2** for **Multiple Voices**: "
     ).strip()
 
     # Prompt user for audiobook type selection
@@ -1027,16 +826,10 @@ async def main():
 
     if voice_option == "1":
         print("\n🎧 Generating audiobook with a **single voice**...")
-        if voice_option == "1":
-            async for line in generate_audio_with_single_voice(
-                output_format, narrator_gender, generate_m4b_audiobook_file, book_path
-            ):
-                print(line)
-        elif voice_option == "3":
-            async for line in generate_audio_with_single_voice_orpheus(
-                output_format, narrator_gender, generate_m4b_audiobook_file, book_path
-            ):
-                print(line)
+        async for line in generate_audio_with_single_voice(
+            output_format, narrator_gender, generate_m4b_audiobook_file, book_path
+        ):
+            print(line)
     elif voice_option == "2":
         print("\n🎭 Generating audiobook with **multiple voices**...")
         async for line in generate_audio_with_multiple_voices(
@@ -1044,9 +837,7 @@ async def main():
         ):
             print(line)
     else:
-        print(
-            "\n⚠️ Invalid option! Please restart and enter either **1**, **2**, or **3**."
-        )
+        print("\n⚠️ Invalid option! Please restart and enter either **1** or **2**.")
         return
 
     print(
