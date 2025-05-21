@@ -14,12 +14,14 @@ Watch the demo video:
 <summary>The project consists of three main components:</summary>
 
 1. **Text Cleaning and Formatting (`book_to_txt.py`)**:
+
    - Extracts and cleans text from a book file (e.g., `book.epub`).
    - Normalizes special characters, fixes line breaks, and corrects formatting issues such as unterminated quotes or incomplete lines.
    - Extracts the main content between specified markers (e.g., "PROLOGUE" and "ABOUT THE AUTHOR").
    - Outputs the cleaned text to `converted_book.txt`.
 
 2. **Character Identification and Metadata Generation (`identify_characters_and_output_book_to_jsonl.py`)**:
+
    - Identifies characters in the text using Named Entity Recognition (NER) with the GLiNER model.
    - Assigns gender and age scores to characters using an LLM via an OpenAI-compatible API.
    - Outputs two files:
@@ -32,7 +34,7 @@ Watch the demo video:
      - **Single-Voice**: Uses a single voice for narration and another voice for dialogues for the entire book.
      - **Multi-Voice**: Assigns different voices to characters based on their gender scores.
    - Saves the audiobook in the selected output format to `generated_audiobooks/audiobook.{output_format}`.
-</details>
+   </details>
 
 ## Key Features
 
@@ -40,7 +42,7 @@ Watch the demo video:
 - **M4B Audiobook Creation**: Creates compatible audiobooks with covers, metadata, chapter timestamps etc. in M4B format.
 - **Multi-Format Input Support**: Converts books from various formats (EPUB, PDF, etc.) into plain text.
 - **Multi-Format Output Support**: Supports various output formats: AAC, M4A, MP3, WAV, OPUS, FLAC, PCM, M4B.
-- **Docker Support**: Use pre-built docker images/ build using docker compose to save time and for a smooth user experience. 
+- **Docker Support**: Use pre-built docker images/ build using docker compose to save time and for a smooth user experience.
 - **Text Cleaning**: Ensures the book text is well-formatted and readable.
 - **Character Identification**: Identifies characters and infers their attributes (gender, age) using advanced NLP techniques.
 - **Customizable Audiobook Narration**: Supports single-voice or multi-voice narration for enhanced listening experiences.
@@ -66,177 +68,185 @@ Watch the demo video:
 ## Get Started
 
 ### Initial Setup
+
 - Install [Docker](https://www.docker.com/products/docker-desktop/)
 - Make sure host networking is enabled in your docker setup : https://docs.docker.com/engine/network/drivers/host/. Host networking is currently supported in Linux and in docker desktop. To use with [docker desktop, follow these steps](https://docs.docker.com/engine/network/drivers/host/#docker-desktop)
 - Set up your LLM and expose an OpenAI-compatible endpoint (e.g., using LM Studio with `qwen3-14b`).
 - Set up the Kokoro TTS model via [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI). To get started, run the docker image using the following command:
 
-   For CUDA based GPU inference (Apple Silicon GPUs currently not supported, use CPU based inference instead). Choose the value of KOKORO_MAX_PARALLEL_REQUESTS_BATCH_SIZE based on [this guide](https://github.com/prakharsr/audiobook-creator/?tab=readme-ov-file#parallel-batch-inferencing-of-audio-for-faster-audio-generation)
+  For CUDA based GPU inference (Apple Silicon GPUs currently not supported, use CPU based inference instead). Choose the value of MAX_PARALLEL_REQUESTS_BATCH_SIZE based on [this guide](https://github.com/prakharsr/audiobook-creator/?tab=readme-ov-file#parallel-batch-inferencing-of-audio-for-faster-audio-generation)
 
-   ```bash
+  ```bash
   docker run \
-    --name kokoro_service \
-    --restart always \
-    --network host \
-    --gpus all \
-    ghcr.io/remsky/kokoro-fastapi-gpu:v0.2.2 \
-    uvicorn api.src.main:app --host 0.0.0.0 --port 8880 --log-level debug \
-    --workers {KOKORO_MAX_PARALLEL_REQUESTS_BATCH_SIZE}
-   ```
+   --name service \
+   --restart always \
+   --network host \
+   --gpus all \
+   ghcr.io/remsky/kokoro-fastapi-gpu:v0.2.2 \
+   uvicorn api.src.main:app --host 0.0.0.0 --port 8880 --log-level debug \
+   --workers {MAX_PARALLEL_REQUESTS_BATCH_SIZE}
+  ```
 
-   For CPU based inference. In this case you can keep number of workers as 1 as only mostly GPU based inferencing benefits from parallel workers and batch requests.
+  For CPU based inference. In this case you can keep number of workers as 1 as only mostly GPU based inferencing benefits from parallel workers and batch requests.
 
-   ```bash
+  ```bash
   docker run \
-    --name kokoro_service \
-    --restart always \
-    --network host \
-    ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.2 \
-    uvicorn api.src.main:app --host 0.0.0.0 --port 8880 --log-level debug \
-    --workers 1
-   ```
+   --name service \
+   --restart always \
+   --network host \
+   ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.2 \
+   uvicorn api.src.main:app --host 0.0.0.0 --port 8880 --log-level debug \
+   --workers 1
+  ```
+
 - Create a .env file from .env_sample and configure it with the correct values. Make sure you follow the instructions mentioned at the top of .env_sample to avoid errors.
-   ```bash
-   cp .env_sample .env
-   ```
-- After this, choose between the below options for the next step to run the audiobook creator app: 
+  ```bash
+  cp .env_sample .env
+  ```
+- After this, choose between the below options for the next step to run the audiobook creator app:
 
    <details>
    <summary>Quickest Start (docker run)</summary>
 
-   - Make sure your .env is configured correctly and your LLM and Kokoro FastAPI are running. In the same folder where .env is present, run the below command
-   - Choose between the types of inference:
-   
-      For CUDA based GPU inference (Apple Silicon GPUs currently not supported, use CPU based inference instead)
+  - Make sure your .env is configured correctly and your LLM and Kokoro FastAPI are running. In the same folder where .env is present, run the below command
+  - Choose between the types of inference:
 
-      ```bash
-      docker run \
-         --name audiobook_creator \
-         --restart always \
-         --network host \
-         --gpus all \
-         --env-file .env \
-         -v model_cache:/app/model_cache \
-         ghcr.io/prakharsr/audiobook_creator_gpu:v1.3
-      ```
+    For CUDA based GPU inference (Apple Silicon GPUs currently not supported, use CPU based inference instead)
 
-      For CPU based inference
+    ```bash
+    docker run \
+       --name audiobook_creator \
+       --restart always \
+       --network host \
+       --gpus all \
+       --env-file .env \
+       -v model_cache:/app/model_cache \
+       ghcr.io/prakharsr/audiobook_creator_gpu:v1.3
+    ```
 
-      ```bash
-      docker run \
-         --name audiobook_creator \
-         --restart always \
-         --network host \
-         --env-file .env \
-         -v model_cache:/app/model_cache \
-         ghcr.io/prakharsr/audiobook_creator_cpu:v1.3
-      ```
-   - Wait for the models to download and then navigate to http://localhost:7860 for the Gradio UI
-   </details>
+    For CPU based inference
+
+    ```bash
+    docker run \
+       --name audiobook_creator \
+       --restart always \
+       --network host \
+       --env-file .env \
+       -v model_cache:/app/model_cache \
+       ghcr.io/prakharsr/audiobook_creator_cpu:v1.3
+    ```
+
+  - Wait for the models to download and then navigate to http://localhost:7860 for the Gradio UI
+  </details>
 
    <details>
    <summary>Quick Start (docker compose)</summary>
 
-   - Clone the repository
-      ```bash 
-      git clone https://github.com/prakharsr/audiobook-creator.git
+  - Clone the repository
 
-      cd audiobook-creator
-      ```
-   - Make sure your .env is configured correctly and your LLM is running
-   - If Kokoro docker container is already running, you can either stop and remove it or comment the kokoro_fastapi service and depends_on param in docker compose. If its not running then it will automatically start when you run docker compose up command
-   - Copy the .env file into the audiobook-creator folder
-   - Choose between the types of inference:
-   
-      For CUDA based GPU inference (Apple Silicon GPUs currently not supported, use CPU based inference instead). Choose the value of KOKORO_MAX_PARALLEL_REQUESTS_BATCH_SIZE based on [this guide](https://github.com/prakharsr/audiobook-creator/?tab=readme-ov-file#parallel-batch-inferencing-of-audio-for-faster-audio-generation) and set the value in kokoro_fastapi service and env variable.
+    ```bash
+    git clone https://github.com/prakharsr/audiobook-creator.git
 
-      ```bash
-      cd docker/gpu
+    cd audiobook-creator
+    ```
 
-      docker compose up --build
-      ```
+  - Make sure your .env is configured correctly and your LLM is running
+  - If Kokoro docker container is already running, you can either stop and remove it or comment the fastapi service and depends_on param in docker compose. If its not running then it will automatically start when you run docker compose up command
+  - Copy the .env file into the audiobook-creator folder
+  - Choose between the types of inference:
 
-      For CPU based inference. In this case you can keep number of workers as 1 as only mostly GPU based inferencing benefits from parallel workers and batch requests.
+    For CUDA based GPU inference (Apple Silicon GPUs currently not supported, use CPU based inference instead). Choose the value of MAX_PARALLEL_REQUESTS_BATCH_SIZE based on [this guide](https://github.com/prakharsr/audiobook-creator/?tab=readme-ov-file#parallel-batch-inferencing-of-audio-for-faster-audio-generation) and set the value in fastapi service and env variable.
 
-      ```bash
-      cd docker/cpu
+    ```bash
+    cd docker/gpu
 
-      docker compose up --build
-      ```
-   - Wait for the models to download and then navigate to http://localhost:7860 for the Gradio UI
-   </details>
+    docker compose up --build
+    ```
+
+    For CPU based inference. In this case you can keep number of workers as 1 as only mostly GPU based inferencing benefits from parallel workers and batch requests.
+
+    ```bash
+    cd docker/cpu
+
+    docker compose up --build
+    ```
+
+  - Wait for the models to download and then navigate to http://localhost:7860 for the Gradio UI
+  </details>
 
    <details>
    <summary>Direct run (via uv)</summary>
 
-   1. Clone the repository
-      ```bash 
+  1.  Clone the repository
+
+      ```bash
       git clone https://github.com/prakharsr/audiobook-creator.git
 
       cd audiobook-creator
       ```
-   2. Make sure your .env is configured correctly and your LLM and Kokoro FastAPI are running
-   3. Copy the .env file into the audiobook-creator folder
-   4. Install uv 
+
+  2.  Make sure your .env is configured correctly and your LLM and Kokoro FastAPI are running
+  3.  Copy the .env file into the audiobook-creator folder
+  4.  Install uv
       ```bash
       curl -LsSf https://astral.sh/uv/install.sh | sh
       ```
-   5. Create a virtual environment with Python 3.12:
+  5.  Create a virtual environment with Python 3.12:
       ```bash
       uv venv --python 3.12
       ```
-   5. Activate the virtual environment:
+  6.  Activate the virtual environment:
       ```bash
       source .venv/bin/activate
       ```
-   6. Install Pip 24.0:
+  7.  Install Pip 24.0:
       ```bash
       uv pip install pip==24.0
       ```
-   7. Install dependencies (choose CPU or GPU version):
+  8.  Install dependencies (choose CPU or GPU version):
       ```bash
       uv pip install -r requirements_cpu.txt
       ```
       ```bash
       uv pip install -r requirements_gpu.txt
       ```
-   8. Upgrade version of six to avoid errors:
+  9.  Upgrade version of six to avoid errors:
       ```bash
       uv pip install --upgrade six==1.17.0
       ```
-   9. Install [calibre](https://calibre-ebook.com/download) (Optional dependency, needed if you need better text decoding capabilities, wider compatibility and want to create M4B audiobook). Also make sure that calibre is present in your PATH. For MacOS, do the following to add it to the PATH:
+  10. Install [calibre](https://calibre-ebook.com/download) (Optional dependency, needed if you need better text decoding capabilities, wider compatibility and want to create M4B audiobook). Also make sure that calibre is present in your PATH. For MacOS, do the following to add it to the PATH:
       ```bash
       deactivate
       echo 'export PATH="/Applications/calibre.app/Contents/MacOS:$PATH"' >> .venv/bin/activate
       source .venv/bin/activate
       ```
-   10. Install [ffmpeg](https://www.ffmpeg.org/download.html) (Needed for audio output format conversion and if you want to create M4B audiobook)
-   11. In the activated virtual environment, run `uvicorn app:app --host 0.0.0.0 --port 7860` to run the Gradio app. After the app has started, navigate to `http://127.0.0.1:7860` in the browser.
-   </details>
+  11. Install [ffmpeg](https://www.ffmpeg.org/download.html) (Needed for audio output format conversion and if you want to create M4B audiobook)
+  12. In the activated virtual environment, run `uvicorn app:app --host 0.0.0.0 --port 7860` to run the Gradio app. After the app has started, navigate to `http://127.0.0.1:7860` in the browser.
+  </details>
 
 ### Parallel batch inferencing of audio for faster audio generation
 
-- Choose the value of **KOKORO_MAX_PARALLEL_REQUESTS_BATCH_SIZE** based on your available VRAM to accelerate the generation of audio by using parallel batch inferencing. This variable is used while setting up the number of workers in kokoro docker container and as an env varible for defining the max number of parallel requests that can be made to kokoro fastapi, so make sure you set the same values for both of them. You can consider setting this value to your available (VRAM/ 2) and play around with the value to see if it works best. If you are unsure then a good starting point for this value can be a value of 2. If you face issues of running out of memory then consider lowering the value for both workers and for the env variable.
+- Choose the value of **MAX_PARALLEL_REQUESTS_BATCH_SIZE** based on your available VRAM to accelerate the generation of audio by using parallel batch inferencing. This variable is used while setting up the number of workers in kokoro docker container and as an env varible for defining the max number of parallel requests that can be made to kokoro fastapi, so make sure you set the same values for both of them. You can consider setting this value to your available (VRAM/ 2) and play around with the value to see if it works best. If you are unsure then a good starting point for this value can be a value of 2. If you face issues of running out of memory then consider lowering the value for both workers and for the env variable.
 
 ## Roadmap
 
 Planned future enhancements:
 
--  ⏳ Add support for choosing between various languages which are currently supported by Kokoro.
--  ⏳ Add support for [Zonos](https://github.com/Zyphra/Zonos), Models: https://huggingface.co/Zyphra/Zonos-v0.1-hybrid, https://huggingface.co/Zyphra/Zonos-v0.1-transformer. Zonos supports voices with a wide range of emotions so adding that as a feature will greatly enhance the listening experience.
--  ⏳ Add support for [Orpheus](https://github.com/canopyai/Orpheus-TTS). Orpheus also supports emotion tags for a more immersive listening experience.
--  ✅ Support batch inference for Kokoro to speed up audiobook generation
--  ✅ Give choice to the user to select the voice in which they want the book to be read (male voice/ female voice)
--  ✅ Add support for running the app through docker.
--  ✅ Create UI using Gradio.
--  ✅ Try different voice combinations using `generate_audio_samples.py` and update the `kokoro_voice_map.json` to use better voices. 
--  ✅ Add support for the these output formats: AAC, M4A, MP3, WAV, OPUS, FLAC, PCM, M4B.
--  ✅ Add support for using calibre to extract the text and metadata for better formatting and wider compatibility.
--  ✅ Add artwork and chapters, and convert audiobooks to M4B format for better compatibility.
--  ✅ Give option to the user for selecting the audio generation format.
--  ✅ Add extended pause when chapters end once chapter recognition is in place.
--  ✅ Improve single-voice narration with a different dialogue voice from the narrator's voice.
--  ✅ Read out only the dialogue in a different voice instead of the entire line in that voice.
+- ⏳ Add support for choosing between various languages which are currently supported by Kokoro.
+- ⏳ Add support for [Zonos](https://github.com/Zyphra/Zonos), Models: https://huggingface.co/Zyphra/Zonos-v0.1-hybrid, https://huggingface.co/Zyphra/Zonos-v0.1-transformer. Zonos supports voices with a wide range of emotions so adding that as a feature will greatly enhance the listening experience.
+- ⏳ Add support for [Orpheus](https://github.com/canopyai/Orpheus-TTS). Orpheus also supports emotion tags for a more immersive listening experience.
+- ✅ Support batch inference for Kokoro to speed up audiobook generation
+- ✅ Give choice to the user to select the voice in which they want the book to be read (male voice/ female voice)
+- ✅ Add support for running the app through docker.
+- ✅ Create UI using Gradio.
+- ✅ Try different voice combinations using `generate_audio_samples.py` and update the `voice_map.json` to use better voices.
+- ✅ Add support for the these output formats: AAC, M4A, MP3, WAV, OPUS, FLAC, PCM, M4B.
+- ✅ Add support for using calibre to extract the text and metadata for better formatting and wider compatibility.
+- ✅ Add artwork and chapters, and convert audiobooks to M4B format for better compatibility.
+- ✅ Give option to the user for selecting the audio generation format.
+- ✅ Add extended pause when chapters end once chapter recognition is in place.
+- ✅ Improve single-voice narration with a different dialogue voice from the narrator's voice.
+- ✅ Read out only the dialogue in a different voice instead of the entire line in that voice.
 
 ## Support
 

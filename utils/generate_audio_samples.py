@@ -25,21 +25,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-KOKORO_BASE_URL = os.environ.get("KOKORO_BASE_URL", "http://localhost:8880/v1")
-KOKORO_API_KEY = os.environ.get("KOKORO_API_KEY", "not-needed")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:8880/v1")
+API_KEY = os.environ.get("API_KEY", "not-needed")
 
 os.makedirs("audio_samples", exist_ok=True)
 
-client = OpenAI(
-    base_url=KOKORO_BASE_URL, api_key=KOKORO_API_KEY
-)
+client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
 
 text = """Humpty Dumpty sat on a wall.
 Humpty Dumpty had a great fall.
 All the king's horses and all the king's men
 Couldn't put Humpty together again."""
 
-response = requests.get(f"{KOKORO_BASE_URL}/audio/voices")
+response = requests.get(f"{BASE_URL}/audio/voices")
 voices_res = response.json()
 voices = voices_res["voices"]
 # print("Available voices:", voices)
@@ -50,31 +48,39 @@ all_voices_combinations = voices.copy()
 for comb in combinations:
     all_voices_combinations.append("+".join(comb))
 
-gen_for_all_combinations = input("Generate voice sample for all voice combinations ? Enter yes or no : ")
+gen_for_all_combinations = input(
+    "Generate voice sample for all voice combinations ? Enter yes or no : "
+)
 gen_for_all_combinations = gen_for_all_combinations.strip().lower()
 
-if(gen_for_all_combinations == "yes"):
-    with tqdm(total=len(all_voices_combinations), unit="line", desc="Audio Generation Progress") as overall_pbar:
+if gen_for_all_combinations == "yes":
+    with tqdm(
+        total=len(all_voices_combinations),
+        unit="line",
+        desc="Audio Generation Progress",
+    ) as overall_pbar:
         for voice in all_voices_combinations:
             with client.audio.speech.with_streaming_response.create(
                 model="kokoro",
                 voice=voice,
                 response_format="aac",  # Ensuring format consistency
                 speed=0.85,
-                input=text
+                input=text,
             ) as response:
                 file_path = f"audio_samples/{voice}.aac"
                 response.stream_to_file(file_path)
             overall_pbar.update(1)
 else:
-    with tqdm(total=len(voices), unit="line", desc="Audio Generation Progress") as overall_pbar:
+    with tqdm(
+        total=len(voices), unit="line", desc="Audio Generation Progress"
+    ) as overall_pbar:
         for voice in voices:
             with client.audio.speech.with_streaming_response.create(
                 model="kokoro",
                 voice=voice,
                 response_format="aac",  # Ensuring format consistency
                 speed=0.85,
-                input=text
+                input=text,
             ) as response:
                 file_path = f"audio_samples/{voice}.aac"
                 response.stream_to_file(file_path)
