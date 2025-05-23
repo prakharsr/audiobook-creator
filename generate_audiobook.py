@@ -189,17 +189,17 @@ async def generate_audio_with_single_voice(
     if narrator_gender == "male":
         if MODEL == "kokoro":
             narrator_voice = "am_puck"
-            dialogue_voice = "af_alloy+am_puck"
+            dialogue_voice = "af_alloy"
         else:
             narrator_voice = "leo"
-            dialogue_voice = "dan+leo"
+            dialogue_voice = "dan"
     else:
         if MODEL == "kokoro":
             narrator_voice = "af_heart"
             dialogue_voice = "af_sky"
         else:
             narrator_voice = "tara"
-            dialogue_voice = "leah+tara"
+            dialogue_voice = "leah"
 
     # Setup directories
     temp_audio_dir = "temp_audio"
@@ -235,41 +235,255 @@ async def generate_audio_with_single_voice(
     async def process_single_line(line_index, line):
         async with semaphore:
             nonlocal progress_counter
-
             if not line:
                 return None
 
-            # Split the line into annotated parts
             annotated_parts = split_and_annotate_text(line)
+            part_files = []  # Store temporary files for each part
 
-            # Create an in-memory buffer for the audio data
-            audio_buffer = bytearray()
-
-            for part in annotated_parts:
+            for i, part in enumerate(annotated_parts):
                 text_to_speak = part["text"]
                 voice_to_speak_in = (
                     narrator_voice if part["type"] == "narration" else dialogue_voice
                 )
 
-                # Generate audio for the part
-                async with async_openai_client.audio.speech.with_streaming_response.create(
-                    model=MODEL,
-                    voice=voice_to_speak_in,
-                    response_format=FORMAT,
-                    speed=0.85,
-                    input=text_to_speak,
-                ) as response:
-                    async for chunk in response.iter_bytes():
-                        audio_buffer.extend(chunk)
+                # Create temporary file for this part
+                part_file_path = os.path.join(
+                    temp_line_audio_dir, f"line_{line_index:06d}_part_{i}.{FORMAT}"
+                )
 
-            # Write this line's audio to a temporary file
-            line_audio_path = os.path.join(
-                temp_line_audio_dir, f"line_{line_index:06d}.{FORMAT}"
-            )
-            with open(line_audio_path, "wb") as line_file:
-                line_file.write(audio_buffer)
+                current_part_audio_buffer = bytearray()
+                try:
+                    async with async_openai_client.audio.speech.with_streaming_response.create(
+                        model=MODEL,
+                        voice=voice_to_speak_in,
+                        response_format=FORMAT,
+                        speed=0.85,
+                        input=text_to_speak,
+                    ) as response:
+                        if response.status_code != 200:
+                            print(
+                                f"ERROR: TTS API returned status {response.status_code} for part type '{part['type']}', voice '{voice_to_speak_in}', text: '{text_to_speak}'"
+                            )
+                            try:
+                                error_content = await response.aread()
+                                print(f"ERROR CONTENT: {error_content.decode()}")
+                            except Exception as e_read:
+                                print(f"ERROR: Could not read error content: {e_read}")
+                            continue  # Skip to the next part
 
-            # Update progress bar
+                        async for chunk in response.iter_bytes():
+                            current_part_audio_buffer.extend(chunk)
+
+                    # Save this part to a temporary file
+                    if len(current_part_audio_buffer) > 0:
+                        with open(part_file_path, "wb") as part_file:
+                            part_file.write(current_part_audio_buffer)
+                        part_files.append(part_file_path)
+                    else:
+                        print(
+                            f"WARNING: TTS for part type '{part['type']}', voice '{voice_to_speak_in}', text: '{text_to_speak[:50]}...' returned 0 bytes despite 200 OK."
+                        )
+
+                except Exception as e:
+                    print(
+                        f"ERROR processing TTS for part type '{part['type']}', voice '{voice_to_speak_in}', text: '{text_to_speak[:50]}...': {e}"
+                    )
+                    continue  # Skip to the next part
+
+            # Concatenate all parts using FFmpeg
+            if part_files:
+                final_line_path = os.path.join(
+                    temp_line_audio_dir, f"line_{line_index:06d}.{FORMAT}"
+                )
+
+                if len(part_files) == 1:
+                    # Single part, just rename the file
+                    os.rename(part_files[0], final_line_path)
+                else:
+                    # Multiple parts, concatenate with FFmpeg
+                    parts_list_file = os.path.join(
+                        temp_line_audio_dir, f"parts_list_{line_index:06d}.txt"
+                    )
+
+                    # Create file list for FFmpeg with absolute paths
+                    with open(parts_list_file, "w", encoding="utf-8") as f:
+                        for part_file in part_files:
+                            abs_path = os.path.abspath(part_file)
+                            f.write(f"file '{abs_path}'\n")
+
+                    # Debug: Show the contents of the parts list file
+                    print(f"\nContents of {parts_list_file}:")
+                    with open(parts_list_file, "r") as f:
+                        print(f.read())
+
+                    # Use FFmpeg filter_complex concat for more reliable concatenation
+                    input_args = ""
+                    filter_complex = ""
+
+                    for i, part_file in enumerate(part_files):
+                        input_args += f" -i '{part_file}'"
+
+                    # Build concat filter - more reliable than demuxer
+                    filter_inputs = "".join(
+                        [f"[{i}:a]" for i in range(len(part_files))]
+                    )
+                    filter_complex = (
+                        f"{filter_inputs}concat=n={len(part_files)}:v=0:a=1[outa]"
+                    )
+
+                    ffmpeg_cmd = f'ffmpeg -y{input_args} -filter_complex "{filter_complex}" -map "[outa]" -c:a aac -b:a 256k \'{final_line_path}\''
+
+                    # Debug: Print info about the parts before concatenation
+                    print(
+                        f"\n=== DEBUG: Line {line_index} has {len(part_files)} parts ==="
+                    )
+                    print(f"Line text: '{line[:100]}...'")
+                    for i, part_file in enumerate(part_files):
+                        part_info = annotated_parts[i]
+                        print(
+                            f"Part {i}: {part_info['type']} - '{part_info['text'][:50]}...'"
+                        )
+                        print(f"  File: {part_file}")
+                        voice_type = (
+                            "narrator"
+                            if part_info["type"] == "narration"
+                            else "dialogue"
+                        )
+                        print(f"  Voice: {voice_type}")
+
+                        # Check if file exists and get size
+                        if os.path.exists(part_file):
+                            file_size = os.path.getsize(part_file)
+                            print(f"  File size: {file_size} bytes")
+                        else:
+                            print(f"  ERROR: File does not exist!")
+
+                    print(f"FFmpeg command: {ffmpeg_cmd}")
+                    print(
+                        f"Proceeding with concatenation of {len(part_files)} parts..."
+                    )
+
+                    # Step 1: Normalize all parts to ensure compatibility
+                    print(f"Normalizing {len(part_files)} parts for concatenation...")
+                    normalized_parts = []
+
+                    for i, part_file in enumerate(part_files):
+                        normalized_file = os.path.join(
+                            temp_line_audio_dir, f"norm_{line_index:06d}_{i}.wav"
+                        )
+
+                        # Normalize to consistent format: 22050Hz, mono, 16-bit PCM WAV
+                        normalize_cmd = [
+                            "ffmpeg",
+                            "-y",
+                            "-i",
+                            part_file,
+                            "-ar",
+                            "22050",
+                            "-ac",
+                            "1",
+                            "-c:a",
+                            "pcm_s16le",
+                            normalized_file,
+                        ]
+
+                        try:
+                            result = subprocess.run(
+                                normalize_cmd,
+                                check=True,
+                                capture_output=True,
+                                text=True,
+                            )
+                            normalized_parts.append(normalized_file)
+                            print(
+                                f"  Normalized part {i}: {os.path.getsize(normalized_file)} bytes"
+                            )
+                        except subprocess.CalledProcessError as e:
+                            print(f"ERROR normalizing part {i}: {e}")
+                            print(f"FFmpeg stderr: {e.stderr}")
+                            continue
+
+                    if not normalized_parts:
+                        print(
+                            "ERROR: No parts could be normalized, using first original part"
+                        )
+                        import shutil
+
+                        shutil.copy2(part_files[0], final_line_path)
+                    else:
+                        # Step 2: Concatenate normalized parts using simple file list
+                        concat_list_file = os.path.join(
+                            temp_line_audio_dir, f"concat_{line_index:06d}.txt"
+                        )
+
+                        with open(concat_list_file, "w", encoding="utf-8") as f:
+                            for norm_file in normalized_parts:
+                                f.write(f"file '{os.path.abspath(norm_file)}'\n")
+
+                        # Final concatenation to target format
+                        if FORMAT == "wav":
+                            concat_cmd = [
+                                "ffmpeg",
+                                "-y",
+                                "-f",
+                                "concat",
+                                "-safe",
+                                "0",
+                                "-i",
+                                concat_list_file,
+                                "-c",
+                                "copy",
+                                final_line_path,
+                            ]
+                        else:
+                            concat_cmd = [
+                                "ffmpeg",
+                                "-y",
+                                "-f",
+                                "concat",
+                                "-safe",
+                                "0",
+                                "-i",
+                                concat_list_file,
+                                "-c:a",
+                                "aac",
+                                "-b:a",
+                                "128k",
+                                final_line_path,
+                            ]
+
+                        try:
+                            result = subprocess.run(
+                                concat_cmd, check=True, capture_output=True, text=True
+                            )
+                            print(
+                                f"✅ Successfully concatenated {len(normalized_parts)} parts"
+                            )
+
+                            # Clean up normalized files
+                            for norm_file in normalized_parts:
+                                os.remove(norm_file)
+                            os.remove(concat_list_file)
+
+                        except subprocess.CalledProcessError as e:
+                            print(f"ERROR in final concatenation: {e}")
+                            print(f"FFmpeg stderr: {e.stderr}")
+                            # Fallback: use first normalized part
+                            import shutil
+
+                            shutil.copy2(normalized_parts[0], final_line_path)
+                            print("Used first normalized part as fallback")
+
+                    # Clean up original parts
+                    for part_file in part_files:
+                        os.remove(part_file)
+                    if os.path.exists(parts_list_file):
+                        os.remove(parts_list_file)
+
+            else:
+                print(f"WARNING: Line {line_index} resulted in no valid audio parts.")
+
             progress_bar.update(1)
             progress_counter += 1
 
@@ -520,7 +734,7 @@ async def generate_audio_with_multiple_voices(
     yield "Set up temporary directories for audio processing"
 
     # Batch processing parameters
-    semaphore = asyncio.Semaphore(MAX_PARALLEL_REQUESTS_BATCH_SIZE)
+    semaphore = asyncio.Semaphore(4)
 
     # Initial setup for chapters
     chapter_index = 1
@@ -558,38 +772,209 @@ async def generate_audio_with_multiple_voices(
                 speaker, character_gender_map, voice_map
             )
 
-            # Split the line into annotated parts
             annotated_parts = split_and_annotate_text(line)
+            part_files = []  # Store temporary files for each part
 
-            # Create an in-memory buffer for the audio data
-            audio_buffer = bytearray()
-
-            for part in annotated_parts:
+            for i, part in enumerate(annotated_parts):
                 text_to_speak = part["text"]
                 voice_to_speak_in = (
                     narrator_voice if part["type"] == "narration" else speaker_voice
                 )
 
-                # Generate audio for the part
-                response_format = "wav" if MODEL == "orpheus" else "aac"
-                async with async_openai_client.audio.speech.with_streaming_response.create(
-                    model=MODEL,
-                    voice=voice_to_speak_in,
-                    response_format=FORMAT,
-                    speed=0.85,
-                    input=text_to_speak,
-                ) as response:
-                    async for chunk in response.iter_bytes():
-                        audio_buffer.extend(chunk)
+                # Create temporary file for this part
+                part_file_path = os.path.join(
+                    temp_line_audio_dir, f"line_{line_index:06d}_part_{i}.{FORMAT}"
+                )
 
-            # Write this line's audio to a temporary file
-            line_audio_path = os.path.join(
-                temp_line_audio_dir, f"line_{line_index:06d}.{FORMAT}"
-            )
-            with open(line_audio_path, "wb") as line_file:
-                line_file.write(audio_buffer)
+                current_part_audio_buffer = bytearray()
+                try:
+                    # Generate audio for the part
+                    # FORMAT is defined globally, ensure it's correct for orpheus vs kokoro
+                    async with async_openai_client.audio.speech.with_streaming_response.create(
+                        model=MODEL,
+                        voice=voice_to_speak_in,
+                        response_format=FORMAT,
+                        speed=0.85,
+                        input=text_to_speak,
+                    ) as response:
+                        if response.status_code != 200:
+                            print(
+                                f"ERROR (multi-voice): TTS API returned status {response.status_code} for part type '{part['type']}', voice '{voice_to_speak_in}', text: '{text_to_speak}'"
+                            )
+                            try:
+                                error_content = await response.aread()
+                                print(
+                                    f"ERROR CONTENT (multi-voice): {error_content.decode()}"
+                                )
+                            except Exception as e_read:
+                                print(
+                                    f"ERROR (multi-voice): Could not read error content: {e_read}"
+                                )
+                            continue  # Skip to the next part in the line
 
-            # Update progress bar
+                        async for chunk in response.iter_bytes():
+                            current_part_audio_buffer.extend(chunk)
+
+                    # Save this part to a temporary file
+                    if len(current_part_audio_buffer) > 0:
+                        with open(part_file_path, "wb") as part_file:
+                            part_file.write(current_part_audio_buffer)
+                        part_files.append(part_file_path)
+                    else:
+                        print(
+                            f"WARNING (multi-voice): TTS for part type '{part['type']}', voice '{voice_to_speak_in}', text: '{text_to_speak[:50]}...' returned 0 bytes despite 200 OK."
+                        )
+
+                except Exception as e:
+                    print(
+                        f"ERROR (multi-voice) processing TTS for part type '{part['type']}', voice '{voice_to_speak_in}', text: '{text_to_speak[:50]}...': {e}"
+                    )
+                    continue  # Skip to the next part
+
+            # Concatenate all parts using FFmpeg
+            if part_files:
+                final_line_path = os.path.join(
+                    temp_line_audio_dir, f"line_{line_index:06d}.{FORMAT}"
+                )
+
+                if len(part_files) == 1:
+                    # Single part, just rename the file
+                    os.rename(part_files[0], final_line_path)
+                else:
+                    # Multiple parts, concatenate with FFmpeg
+                    parts_list_file = os.path.join(
+                        temp_line_audio_dir, f"parts_list_{line_index:06d}.txt"
+                    )
+
+                    # Create file list for FFmpeg with absolute paths
+                    with open(parts_list_file, "w", encoding="utf-8") as f:
+                        for part_file in part_files:
+                            abs_path = os.path.abspath(part_file)
+                            f.write(f"file '{abs_path}'\n")
+
+                    # Step 1: Normalize all parts to ensure compatibility (multi-voice)
+                    print(
+                        f"Multi-voice: Normalizing {len(part_files)} parts for concatenation..."
+                    )
+                    normalized_parts = []
+
+                    for i, part_file in enumerate(part_files):
+                        normalized_file = os.path.join(
+                            temp_line_audio_dir, f"mv_norm_{line_index:06d}_{i}.wav"
+                        )
+
+                        # Normalize to consistent format: 22050Hz, mono, 16-bit PCM WAV
+                        normalize_cmd = [
+                            "ffmpeg",
+                            "-y",
+                            "-i",
+                            part_file,
+                            "-ar",
+                            "22050",
+                            "-ac",
+                            "1",
+                            "-c:a",
+                            "pcm_s16le",
+                            normalized_file,
+                        ]
+
+                        try:
+                            result = subprocess.run(
+                                normalize_cmd,
+                                check=True,
+                                capture_output=True,
+                                text=True,
+                            )
+                            normalized_parts.append(normalized_file)
+                            print(
+                                f"  Multi-voice normalized part {i}: {os.path.getsize(normalized_file)} bytes"
+                            )
+                        except subprocess.CalledProcessError as e:
+                            print(f"ERROR (multi-voice) normalizing part {i}: {e}")
+                            print(f"FFmpeg stderr: {e.stderr}")
+                            continue
+
+                    if not normalized_parts:
+                        print(
+                            "ERROR (multi-voice): No parts could be normalized, using first original part"
+                        )
+                        import shutil
+
+                        shutil.copy2(part_files[0], final_line_path)
+                    else:
+                        # Step 2: Concatenate normalized parts using simple file list
+                        concat_list_file = os.path.join(
+                            temp_line_audio_dir, f"mv_concat_{line_index:06d}.txt"
+                        )
+
+                        with open(concat_list_file, "w", encoding="utf-8") as f:
+                            for norm_file in normalized_parts:
+                                f.write(f"file '{os.path.abspath(norm_file)}'\n")
+
+                        # Final concatenation to target format
+                        if FORMAT == "wav":
+                            concat_cmd = [
+                                "ffmpeg",
+                                "-y",
+                                "-f",
+                                "concat",
+                                "-safe",
+                                "0",
+                                "-i",
+                                concat_list_file,
+                                "-c",
+                                "copy",
+                                final_line_path,
+                            ]
+                        else:
+                            concat_cmd = [
+                                "ffmpeg",
+                                "-y",
+                                "-f",
+                                "concat",
+                                "-safe",
+                                "0",
+                                "-i",
+                                concat_list_file,
+                                "-c:a",
+                                "aac",
+                                "-b:a",
+                                "128k",
+                                final_line_path,
+                            ]
+
+                        try:
+                            result = subprocess.run(
+                                concat_cmd, check=True, capture_output=True, text=True
+                            )
+                            print(
+                                f"✅ Multi-voice: Successfully concatenated {len(normalized_parts)} parts"
+                            )
+
+                            # Clean up normalized files
+                            for norm_file in normalized_parts:
+                                os.remove(norm_file)
+                            os.remove(concat_list_file)
+
+                        except subprocess.CalledProcessError as e:
+                            print(f"ERROR (multi-voice) in final concatenation: {e}")
+                            print(f"FFmpeg stderr: {e.stderr}")
+                            # Fallback: use first normalized part
+                            import shutil
+
+                            shutil.copy2(normalized_parts[0], final_line_path)
+                            print("Multi-voice: Used first normalized part as fallback")
+
+                    # Clean up original parts
+                    for part_file in part_files:
+                        os.remove(part_file)
+                    if os.path.exists(parts_list_file):
+                        os.remove(parts_list_file)
+            else:
+                print(
+                    f"WARNING (multi-voice): Line {line_index} resulted in no valid audio parts."
+                )
+
             progress_bar.update(1)
             progress_counter += 1
 
@@ -931,4 +1316,9 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # asyncio.run(main())
+    async def test():
+        async for item in generate_audio_with_single_voice("m4a", "male", False, ""):
+            print(item)
+
+    asyncio.run(test())
