@@ -5,6 +5,5 @@ model_cache/
 audio_samples/
 temp_audio/
 todo.md
-.venv/
-.DS_Store
-.env
+
+.*
