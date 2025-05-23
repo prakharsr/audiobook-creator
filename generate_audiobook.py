@@ -77,6 +77,14 @@ def sanitize_filename(text):
     return text
 
 
+def sanitize_book_title_for_filename(book_title):
+    """Sanitize book title to be safe for filesystem use"""
+    safe_title = "".join(
+        c for c in book_title if c.isalnum() or c in (" ", "-", "_")
+    ).rstrip()
+    return safe_title or "audiobook"  # fallback if title becomes empty
+
+
 def split_and_annotate_text(text):
     """Splits text into dialogue and narration while annotating each segment."""
     parts = re.split(r'("[^"]+")', text)  # Keep dialogues in the split result
@@ -153,7 +161,11 @@ def find_voice_for_gender_score(character: str, character_gender_map, voice_map)
 
 
 async def generate_audio_with_single_voice(
-    output_format, narrator_gender, generate_m4b_audiobook_file=False, book_path=""
+    output_format,
+    narrator_gender,
+    generate_m4b_audiobook_file=False,
+    book_path="",
+    book_title="audiobook",
 ):
     # Read the text from the file
     """
@@ -660,14 +672,19 @@ async def generate_audio_with_single_voice(
         merge_chapters_to_standard_audio_file(m4a_chapter_files)
         # When using Orpheus, we've already generated m4a files
         source_format = "m4a" if MODEL == "orpheus" else FORMAT
+        safe_book_title = sanitize_book_title_for_filename(book_title)
         convert_audio_file_formats(
-            source_format, output_format, "generated_audiobooks", "audiobook"
+            source_format, output_format, "generated_audiobooks", safe_book_title
         )
         yield f"Audiobook in {output_format} format created successfully"
 
 
 async def generate_audio_with_multiple_voices(
-    output_format, narrator_gender, generate_m4b_audiobook_file=False, book_path=""
+    output_format,
+    narrator_gender,
+    generate_m4b_audiobook_file=False,
+    book_path="",
+    book_title="audiobook",
 ):
     # Path to the JSONL file containing speaker-attributed lines
     """
@@ -1148,14 +1165,15 @@ async def generate_audio_with_multiple_voices(
         # Merge all chapter files into a standard M4A audiobook
         yield "Creating final audiobook..."
         merge_chapters_to_standard_audio_file(m4a_chapter_files)
+        safe_book_title = sanitize_book_title_for_filename(book_title)
         convert_audio_file_formats(
-            "m4a", output_format, "generated_audiobooks", "audiobook"
+            "m4a", output_format, "generated_audiobooks", safe_book_title
         )
         yield f"Audiobook in {output_format} format created successfully"
 
 
 async def process_audiobook_generation(
-    voice_option, narrator_gender, output_format, book_path
+    voice_option, narrator_gender, output_format, book_path, book_title="audiobook"
 ):
     # Select narrator voice string based on narrator_gender and MODEL
     if narrator_gender == "male":
@@ -1189,6 +1207,7 @@ async def process_audiobook_generation(
             narrator_gender,
             generate_m4b_audiobook_file,
             book_path,
+            book_title,
         ):
             yield line
     elif voice_option == "Multi-Voice":
@@ -1199,6 +1218,7 @@ async def process_audiobook_generation(
             narrator_gender,
             generate_m4b_audiobook_file,
             book_path,
+            book_title,
         ):
             yield line
 
@@ -1316,5 +1336,4 @@ async def main():
 
 
 if __name__ == "__main__":
-        asyncio.run(main())
-  
+    asyncio.run(main())

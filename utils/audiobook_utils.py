@@ -336,7 +336,7 @@ def merge_chapters_to_m4b(book_path, chapter_files):
     # Generate chapter metadata
     generate_chapters_file(chapter_files, "chapters.txt")
 
-    output_m4b = "generated_audiobooks/audiobook.m4b"
+    output_m4b = f"generated_audiobooks/{title}.m4b"
     cover_image = "cover.jpg"
 
     # Construct metadata arguments safely
