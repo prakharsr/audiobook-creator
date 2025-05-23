@@ -1316,9 +1316,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    # asyncio.run(main())
-    async def test():
-        async for item in generate_audio_with_single_voice("m4a", "male", False, ""):
-            print(item)
-
-    asyncio.run(test())
+        asyncio.run(main())
+  
