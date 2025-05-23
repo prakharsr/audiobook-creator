@@ -80,7 +80,7 @@ def check_if_calibre_is_installed():
         return True
     else:
         return False
-    
+
 def check_if_ffmpeg_is_installed():
     """
     Checks if FFmpeg is installed.

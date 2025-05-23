@@ -1,0 +1,6 @@
+file 'temp_audio/Introduction.m4a'
+file 'temp_audio/Chapter 1 The Mysterious Map.m4a'
+file 'temp_audio/Chapter 2 Into the Forest.m4a'
+file 'temp_audio/Chapter 3 The Hidden Cave.m4a'
+file 'temp_audio/Chapter 4 The Treasure.m4a'
+file 'temp_audio/Chapter 5 A New Beginning.m4a'

@@ -1,0 +1,37 @@
+;FFMETADATA1
+[CHAPTER]
+TIMEBASE=1/1000
+START=0
+END=5377
+title=Introduction
+
+[CHAPTER]
+TIMEBASE=1/1000
+START=5377
+END=42242
+title=Chapter 1 The Mysterious Map
+
+[CHAPTER]
+TIMEBASE=1/1000
+START=42242
+END=66307
+title=Chapter 2 Into the Forest
+
+[CHAPTER]
+TIMEBASE=1/1000
+START=66307
+END=88324
+title=Chapter 3 The Hidden Cave
+
+[CHAPTER]
+TIMEBASE=1/1000
+START=88324
+END=120239
+title=Chapter 4 The Treasure
+
+[CHAPTER]
+TIMEBASE=1/1000
+START=120239
+END=150789
+title=Chapter 5 A New Beginning
+
