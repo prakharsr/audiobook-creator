@@ -29,7 +29,9 @@ Watch the demo video:
      - `character_gender_map.json`: Metadata about characters, including name, age, gender, and gender score.
 
 3. **Audiobook Generation (`generate_audiobook.py`)**:
-   - Converts the cleaned text (`converted_book.txt`) or speaker-attributed text (`speaker_attributed_book.jsonl`) into an audiobook using the Kokoro TTS model ([Hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)).
+   - Converts the cleaned text (`converted_book.txt`) or speaker-attributed text (`speaker_attributed_book.jsonl`) into an audiobook using your choice of TTS models:
+     - **Kokoro TTS** ([Hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)) - High-quality, fast TTS with multiple voices
+     - **Orpheus TTS** ([Orpheus-FastAPI](https://github.com/Lex-au/Orpheus-FastAPI)) - High-performance TTS with emotion tags, 8 voices, and OpenAI-compatible API
    - Offers two narration modes:
      - **Single-Voice**: Uses a single voice for narration and another voice for dialogues for the entire book.
      - **Multi-Voice**: Assigns different voices to characters based on their gender scores.
@@ -72,7 +74,9 @@ Watch the demo video:
 - Install [Docker](https://www.docker.com/products/docker-desktop/)
 - Make sure host networking is enabled in your docker setup : https://docs.docker.com/engine/network/drivers/host/. Host networking is currently supported in Linux and in docker desktop. To use with [docker desktop, follow these steps](https://docs.docker.com/engine/network/drivers/host/#docker-desktop)
 - Set up your LLM and expose an OpenAI-compatible endpoint (e.g., using LM Studio with `qwen3-14b`).
-- Set up the Kokoro TTS model via [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI). To get started, run the docker image using the following command:
+- **Choose and set up your TTS service** (one of the following):
+
+  **Option A: Kokoro TTS** via [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI). To get started, run the docker image using the following command:
 
   For CUDA based GPU inference (Apple Silicon GPUs currently not supported, use CPU based inference instead). Choose the value of MAX_PARALLEL_REQUESTS_BATCH_SIZE based on [this guide](https://github.com/prakharsr/audiobook-creator/?tab=readme-ov-file#parallel-batch-inferencing-of-audio-for-faster-audio-generation)
 
@@ -97,6 +101,25 @@ Watch the demo video:
    ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.2 \
    uvicorn api.src.main:app --host 0.0.0.0 --port 8880 --log-level debug \
    --workers 1
+  ```
+
+  **Option B: Orpheus TTS** via [Orpheus-FastAPI](https://github.com/Lex-au/Orpheus-FastAPI). Orpheus offers high-performance TTS with emotion tags and 8 different voices. To get started:
+
+  ```bash
+  git clone https://github.com/Lex-au/Orpheus-FastAPI.git
+  cd Orpheus-FastAPI
+
+  # For GPU inference
+  docker-compose -f docker-compose-gpu.yml up
+
+  # For CPU inference
+  docker-compose -f docker-compose-cpu.yaml up
+  ```
+
+  This will start the Orpheus TTS service on port 5005. Make sure to update your `.env` file accordingly:
+
+  ```
+  BASE_URL=http://localhost:5005/v1
   ```
 
 - Create a .env file from .env_sample and configure it with the correct values. Make sure you follow the instructions mentioned at the top of .env_sample to avoid errors.
@@ -151,7 +174,9 @@ Watch the demo video:
     ```
 
   - Make sure your .env is configured correctly and your LLM is running
-  - If Kokoro docker container is already running, you can either stop and remove it or comment the fastapi service and depends_on param in docker compose. If its not running then it will automatically start when you run docker compose up command
+  - **Optional TTS Services**: You can optionally include TTS services in your docker-compose setup:
+    - To include **Kokoro TTS**: Use `docker compose --profile kokoro up --build`
+    - To run **without any TTS service** (if you're running TTS separately): Use `docker compose up --build`
   - Copy the .env file into the audiobook-creator folder
   - Choose between the types of inference:
 
@@ -160,6 +185,10 @@ Watch the demo video:
     ```bash
     cd docker/gpu
 
+    # To include Kokoro TTS service
+    docker compose --profile kokoro up --build
+
+    # To run without TTS service (if using external TTS)
     docker compose up --build
     ```
 
@@ -168,6 +197,10 @@ Watch the demo video:
     ```bash
     cd docker/cpu
 
+    # To include Kokoro TTS service
+    docker compose --profile kokoro up --build
+
+    # To run without TTS service (if using external TTS)
     docker compose up --build
     ```
 
@@ -185,7 +218,7 @@ Watch the demo video:
       cd audiobook-creator
       ```
 
-  2.  Make sure your .env is configured correctly and your LLM and Kokoro FastAPI are running
+  2.  Make sure your .env is configured correctly and your LLM and TTS service (Kokoro or Orpheus) are running
   3.  Copy the .env file into the audiobook-creator folder
   4.  Install uv
       ```bash
@@ -224,9 +257,28 @@ Watch the demo video:
   12. In the activated virtual environment, run `uvicorn app:app --host 0.0.0.0 --port 7860` to run the Gradio app. After the app has started, navigate to `http://127.0.0.1:7860` in the browser.
   </details>
 
+### TTS Service Options
+
+This audiobook creator supports multiple TTS (Text-to-Speech) services:
+
+**Kokoro TTS** ([Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI))
+
+- High-quality, fast TTS with multiple voices
+- Excellent for quick audiobook generation
+- Default port: 8880
+
+**Orpheus TTS** ([Orpheus-FastAPI](https://github.com/Lex-au/Orpheus-FastAPI))
+
+- High-performance TTS with emotion tags
+- 8 different voices with emotional expressions
+- Optimized for RTX GPUs
+- Default port: 5005
+
+You can choose either service based on your preferences. Both are compatible with the audiobook creator and offer OpenAI-compatible APIs.
+
 ### Parallel batch inferencing of audio for faster audio generation
 
-- Choose the value of **MAX_PARALLEL_REQUESTS_BATCH_SIZE** based on your available VRAM to accelerate the generation of audio by using parallel batch inferencing. This variable is used while setting up the number of workers in kokoro docker container and as an env varible for defining the max number of parallel requests that can be made to kokoro fastapi, so make sure you set the same values for both of them. You can consider setting this value to your available (VRAM/ 2) and play around with the value to see if it works best. If you are unsure then a good starting point for this value can be a value of 2. If you face issues of running out of memory then consider lowering the value for both workers and for the env variable.
+- Choose the value of **MAX_PARALLEL_REQUESTS_BATCH_SIZE** based on your available VRAM to accelerate the generation of audio by using parallel batch inferencing. This variable is used while setting up the number of workers in the TTS docker container and as an env variable for defining the max number of parallel requests that can be made to the TTS service, so make sure you set the same values for both of them. You can consider setting this value to your available (VRAM/ 2) and play around with the value to see if it works best. If you are unsure then a good starting point for this value can be a value of 2. If you face issues of running out of memory then consider lowering the value for both workers and for the env variable.
 
 ## Roadmap
 
@@ -234,7 +286,7 @@ Planned future enhancements:
 
 - ⏳ Add support for choosing between various languages which are currently supported by Kokoro.
 - ⏳ Add support for [Zonos](https://github.com/Zyphra/Zonos), Models: https://huggingface.co/Zyphra/Zonos-v0.1-hybrid, https://huggingface.co/Zyphra/Zonos-v0.1-transformer. Zonos supports voices with a wide range of emotions so adding that as a feature will greatly enhance the listening experience.
-- ⏳ Add support for [Orpheus](https://github.com/canopyai/Orpheus-TTS). Orpheus also supports emotion tags for a more immersive listening experience.
+- ✅ Add support for [Orpheus TTS](https://github.com/Lex-au/Orpheus-FastAPI). Orpheus supports emotion tags and 8 different voices for a more immersive listening experience.
 - ✅ Support batch inference for Kokoro to speed up audiobook generation
 - ✅ Give choice to the user to select the voice in which they want the book to be read (male voice/ female voice)
 - ✅ Add support for running the app through docker.

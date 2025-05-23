@@ -21,17 +21,19 @@ services:
               count: all
               capabilities: [gpu]
 
-  # fastapi:
-  #   image: ghcr.io/remsky/kokoro-fastapi-gpu:v0.2.2
-  #   container_name: service
-  #   restart: always
-  #   network_mode: host
-  #   command: >
-  #     uvicorn api.src.main:app --host 0.0.0.0 --port 8880 --log-level debug --workers MAX_PARALLEL_REQUESTS_BATCH_SIZE
-  #   deploy:
-  #     resources:
-  #       reservations:
-  #         devices:
-  #           - driver: nvidia
-  #             count: all
-  #             capabilities: [gpu]
+  fastapi:
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:v0.2.2
+    container_name: kokoro_service
+    restart: always
+    network_mode: host
+    profiles:
+      - kokoro
+    command: >
+      uvicorn api.src.main:app --host 0.0.0.0 --port 8880 --log-level debug --workers ${MAX_PARALLEL_REQUESTS_BATCH_SIZE:-1}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
