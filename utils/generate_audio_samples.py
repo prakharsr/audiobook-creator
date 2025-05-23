@@ -28,7 +28,7 @@ load_dotenv()
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8880/v1")
 API_KEY = os.environ.get("API_KEY", "not-needed")
 MODEL = os.environ.get("MODEL", "kokoro")
-
+FORMAT = "wav" if MODEL == "orpheus" else "aac"
 os.makedirs("audio_samples", exist_ok=True)
 
 client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
@@ -64,11 +64,11 @@ if gen_for_all_combinations == "yes":
             with client.audio.speech.with_streaming_response.create(
                 model=MODEL,
                 voice=voice,
-                response_format="aac",  # Ensuring format consistency
+                response_format=FORMAT,  # Ensuring format consistency
                 speed=0.85,
                 input=text,
             ) as response:
-                file_path = f"audio_samples/{voice}.aac"
+                file_path = f"audio_samples/{voice}.{FORMAT}"
                 response.stream_to_file(file_path)
             overall_pbar.update(1)
 else:
@@ -79,11 +79,11 @@ else:
             with client.audio.speech.with_streaming_response.create(
                 model=MODEL,
                 voice=voice,
-                response_format="aac",  # Ensuring format consistency
+                response_format=FORMAT,  # Ensuring format consistency
                 speed=0.85,
                 input=text,
             ) as response:
-                file_path = f"audio_samples/{voice}.aac"
+                file_path = f"audio_samples/{voice}.{FORMAT}"
                 response.stream_to_file(file_path)
             overall_pbar.update(1)
 

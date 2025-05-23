@@ -20,11 +20,12 @@ import traceback
 
 
 async def check_tts_api(client, model, voice):
+    FORMAT = "wav" if model == "orpheus" else "aac"
     try:
         async with client.audio.speech.with_streaming_response.create(
             model=model,
             voice=voice,
-            response_format="aac",  # Ensuring format consistency
+            response_format=FORMAT,
             speed=0.85,
             input="Hello, how are you ?",
         ) as response:

@@ -41,6 +41,7 @@ from utils.audiobook_utils import (
 )
 from utils.check_tts_api import check_tts_api
 from dotenv import load_dotenv
+import subprocess
 
 load_dotenv()
 
@@ -56,6 +57,9 @@ VOICE_MAP = (
     else read_json("static_files/orpheus_voice_map_male_narrator.json")
 )
 
+# When using Orpheus, we need to use WAV for line segments but M4A for final chapters to avoid format issues
+FORMAT = "wav" if MODEL == "orpheus" else "aac"
+CHAPTER_FORMAT = "m4a" if MODEL == "orpheus" else FORMAT
 os.makedirs("audio_samples", exist_ok=True)
 
 async_openai_client = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY)
@@ -211,7 +215,10 @@ async def generate_audio_with_single_voice(
 
     # Initial setup for chapters
     chapter_index = 1
-    current_chapter_audio = f"Introduction.aac"
+    if MODEL == "orpheus":
+        current_chapter_audio = "Introduction.m4a"
+    else:
+        current_chapter_audio = f"Introduction.{CHAPTER_FORMAT}"
     chapter_files = []
 
     # First pass: Generate audio for each line independently
@@ -248,7 +255,7 @@ async def generate_audio_with_single_voice(
                 async with async_openai_client.audio.speech.with_streaming_response.create(
                     model=MODEL,
                     voice=voice_to_speak_in,
-                    response_format="aac",
+                    response_format=FORMAT,
                     speed=0.85,
                     input=text_to_speak,
                 ) as response:
@@ -257,7 +264,7 @@ async def generate_audio_with_single_voice(
 
             # Write this line's audio to a temporary file
             line_audio_path = os.path.join(
-                temp_line_audio_dir, f"line_{line_index:06d}.aac"
+                temp_line_audio_dir, f"line_{line_index:06d}.{FORMAT}"
             )
             with open(line_audio_path, "wb") as line_file:
                 line_file.write(audio_buffer)
@@ -320,7 +327,12 @@ async def generate_audio_with_single_voice(
         # Check if this is a chapter heading
         if result["is_chapter_heading"]:
             chapter_index += 1
-            current_chapter_audio = f"{sanitize_filename(result['line'])}.aac"
+            if MODEL == "orpheus":
+                current_chapter_audio = f"{sanitize_filename(result['line'])}.m4a"
+            else:
+                current_chapter_audio = (
+                    f"{sanitize_filename(result['line'])}.{CHAPTER_FORMAT}"
+                )
 
         if current_chapter_audio not in chapter_files:
             chapter_files.append(current_chapter_audio)
@@ -339,32 +351,57 @@ async def generate_audio_with_single_voice(
     )
 
     for chapter_file in chapter_files:
-        chapter_path = os.path.join(temp_audio_dir, chapter_file)
-
-        with open(chapter_path, "wb") as chapter_output:
-            # Create progress bar for lines in this chapter
-            line_assembly_bar = tqdm(
-                total=len(chapter_line_map[chapter_file]),
-                unit="line",
-                desc=f"Assembling {chapter_file[:20]}...",
+        # Force m4a extension for chapter files with Orpheus to avoid issues
+        if MODEL == "orpheus":
+            chapter_path = os.path.join(
+                temp_audio_dir, f"{chapter_file.split('.')[0]}.m4a"
             )
+        else:
+            chapter_path = os.path.join(temp_audio_dir, chapter_file)
 
-            # Process each line in the correct order
+        # Create a temporary file list for this chapter's lines
+        chapter_lines_list = "chapter_lines_list.txt"
+        with open(chapter_lines_list, "w", encoding="utf-8") as f:
             for line_index in sorted(chapter_line_map[chapter_file]):
                 line_audio_path = os.path.join(
-                    temp_line_audio_dir, f"line_{line_index:06d}.aac"
+                    temp_line_audio_dir, f"line_{line_index:06d}.{FORMAT}"
                 )
+                f.write(f"file '{line_audio_path}'\n")
 
-                # Read the line audio and append it to the chapter file
-                with open(line_audio_path, "rb") as line_input:
-                    chapter_output.write(line_input.read())
+        # Use FFmpeg to concatenate the lines
+        if MODEL == "orpheus":
+            # For Orpheus, convert WAV segments to M4A chapters directly
+            ffmpeg_cmd = (
+                f"ffmpeg -y -f concat -safe 0 -i {chapter_lines_list} "
+                f'-c:a aac -b:a 256k -ar 44100 -ac 2 "{chapter_path}"'
+            )
+        else:
+            # For other models, we need to re-encode to ensure proper AAC format
+            ffmpeg_cmd = (
+                f"ffmpeg -y -f concat -safe 0 -i {chapter_lines_list} "
+                f'-c:a aac -b:a 256k -ar 44100 -ac 2 "{chapter_path}"'
+            )
 
-                line_assembly_bar.update(1)
-
-            line_assembly_bar.close()
+        # Print the command for debugging
+        print(f"[DEBUG] FFmpeg command: {ffmpeg_cmd}")
+        try:
+            result = subprocess.run(
+                ffmpeg_cmd, shell=True, check=True, capture_output=True, text=True
+            )
+            print(f"[DEBUG] FFmpeg stdout: {result.stdout}")
+            print(f"[DEBUG] FFmpeg stderr: {result.stderr}")
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] FFmpeg failed for {chapter_file}:")
+            print(f"[ERROR] Command: {ffmpeg_cmd}")
+            print(f"[ERROR] Stdout: {e.stdout}")
+            print(f"[ERROR] Stderr: {e.stderr}")
+            raise e
 
         chapter_assembly_bar.update(1)
         yield f"Assembled chapter: {chapter_file}"
+
+        # Clean up the temporary file list
+        os.remove(chapter_lines_list)
 
     chapter_assembly_bar.close()
 
@@ -376,7 +413,7 @@ async def generate_audio_with_single_voice(
     # Add silence to each chapter file
     for chapter in chapter_files:
         add_silence_to_audio_file_by_appending_pre_generated_silence(
-            temp_audio_dir, chapter
+            temp_audio_dir, chapter, CHAPTER_FORMAT
         )
         post_processing_bar.update(1)
         yield f"Added silence to chapter: {chapter}"
@@ -385,10 +422,10 @@ async def generate_audio_with_single_voice(
 
     # Convert all chapter files to M4A format
     for chapter in chapter_files:
-        chapter_name = chapter.split(".")[0]
+        chapter_name = chapter.split(f".{CHAPTER_FORMAT}")[0]
         m4a_chapter_files.append(f"{chapter_name}.m4a")
-        # Convert to M4A as raw AAC have problems with timestamps and metadata
-        convert_audio_file_formats("aac", "m4a", temp_audio_dir, chapter_name)
+        # Convert to M4A as raw WAV/AAC have problems with timestamps and metadata
+        convert_audio_file_formats(CHAPTER_FORMAT, "m4a", temp_audio_dir, chapter_name)
         post_processing_bar.update(1)
         yield f"Converted chapter to M4A: {chapter_name}"
 
@@ -407,8 +444,10 @@ async def generate_audio_with_single_voice(
         # Merge all chapter files into a standard M4A audiobook
         yield "Creating final audiobook..."
         merge_chapters_to_standard_audio_file(m4a_chapter_files)
+        # When using Orpheus, we've already generated m4a files
+        source_format = "m4a" if MODEL == "orpheus" else FORMAT
         convert_audio_file_formats(
-            "m4a", output_format, "generated_audiobooks", "audiobook"
+            source_format, output_format, "generated_audiobooks", "audiobook"
         )
         yield f"Audiobook in {output_format} format created successfully"
 
@@ -485,7 +524,10 @@ async def generate_audio_with_multiple_voices(
 
     # Initial setup for chapters
     chapter_index = 1
-    current_chapter_audio = f"Introduction.aac"
+    if MODEL == "orpheus":
+        current_chapter_audio = "Introduction.m4a"
+    else:
+        current_chapter_audio = f"Introduction.{CHAPTER_FORMAT}"
     chapter_files = []
 
     # First pass: Generate audio for each line independently
@@ -529,10 +571,11 @@ async def generate_audio_with_multiple_voices(
                 )
 
                 # Generate audio for the part
+                response_format = "wav" if MODEL == "orpheus" else "aac"
                 async with async_openai_client.audio.speech.with_streaming_response.create(
                     model=MODEL,
                     voice=voice_to_speak_in,
-                    response_format="aac",
+                    response_format=FORMAT,
                     speed=0.85,
                     input=text_to_speak,
                 ) as response:
@@ -541,7 +584,7 @@ async def generate_audio_with_multiple_voices(
 
             # Write this line's audio to a temporary file
             line_audio_path = os.path.join(
-                temp_line_audio_dir, f"line_{line_index:06d}.aac"
+                temp_line_audio_dir, f"line_{line_index:06d}.{FORMAT}"
             )
             with open(line_audio_path, "wb") as line_file:
                 line_file.write(audio_buffer)
@@ -605,7 +648,12 @@ async def generate_audio_with_multiple_voices(
         # Check if this is a chapter heading
         if result["is_chapter_heading"]:
             chapter_index += 1
-            current_chapter_audio = f"{sanitize_filename(result['line'])}.aac"
+            if MODEL == "orpheus":
+                current_chapter_audio = f"{sanitize_filename(result['line'])}.m4a"
+            else:
+                current_chapter_audio = (
+                    f"{sanitize_filename(result['line'])}.{CHAPTER_FORMAT}"
+                )
 
         if current_chapter_audio not in chapter_files:
             chapter_files.append(current_chapter_audio)
@@ -623,39 +671,57 @@ async def generate_audio_with_multiple_voices(
         total=len(chapter_files), unit="chapter", desc="Assembling Chapters"
     )
 
-    for chapter_idx, chapter_file in enumerate(chapter_files):
-        chapter_path = os.path.join(temp_audio_dir, chapter_file)
-        chapter_name_display = (
-            chapter_file[:30] + "..." if len(chapter_file) > 30 else chapter_file
-        )
-
-        with open(chapter_path, "wb") as chapter_output:
-            # Create progress bar for lines in this chapter
-            line_assembly_bar = tqdm(
-                total=len(chapter_line_map[chapter_file]),
-                unit="line",
-                desc=f"Chapter {chapter_idx+1}/{len(chapter_files)}: {chapter_name_display}",
+    for chapter_file in chapter_files:
+        # Force m4a extension for chapter files with Orpheus to avoid issues
+        if MODEL == "orpheus":
+            chapter_path = os.path.join(
+                temp_audio_dir, f"{chapter_file.split('.')[0]}.m4a"
             )
+        else:
+            chapter_path = os.path.join(temp_audio_dir, chapter_file)
 
-            # Process each line in the correct order
+        # Create a temporary file list for this chapter's lines
+        chapter_lines_list = "chapter_lines_list.txt"
+        with open(chapter_lines_list, "w", encoding="utf-8") as f:
             for line_index in sorted(chapter_line_map[chapter_file]):
                 line_audio_path = os.path.join(
-                    temp_line_audio_dir, f"line_{line_index:06d}.aac"
+                    temp_line_audio_dir, f"line_{line_index:06d}.{FORMAT}"
                 )
+                f.write(f"file '{line_audio_path}'\n")
 
-                # Read the line audio and append it to the chapter file
-                with open(line_audio_path, "rb") as line_input:
-                    chapter_output.write(line_input.read())
+        # Use FFmpeg to concatenate the lines
+        if MODEL == "orpheus":
+            # For Orpheus, convert WAV segments to M4A chapters directly
+            ffmpeg_cmd = (
+                f"ffmpeg -y -f concat -safe 0 -i {chapter_lines_list} "
+                f'-c:a aac -b:a 256k -ar 44100 -ac 2 "{chapter_path}"'
+            )
+        else:
+            # For other models, we can use copy
+            ffmpeg_cmd = f"ffmpeg -y -f concat -safe 0 -i {chapter_lines_list} -c copy '{chapter_path}'"
 
-                line_assembly_bar.update(1)
-
-            line_assembly_bar.close()
+        # Print the command for debugging
+        print(f"[DEBUG] FFmpeg command: {ffmpeg_cmd}")
+        try:
+            result = subprocess.run(
+                ffmpeg_cmd, shell=True, check=True, capture_output=True, text=True
+            )
+            print(f"[DEBUG] FFmpeg stdout: {result.stdout}")
+            print(f"[DEBUG] FFmpeg stderr: {result.stderr}")
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] FFmpeg failed for {chapter_file}:")
+            print(f"[ERROR] Command: {ffmpeg_cmd}")
+            print(f"[ERROR] Stdout: {e.stdout}")
+            print(f"[ERROR] Stderr: {e.stderr}")
+            raise e
 
         chapter_assembly_bar.update(1)
-        yield f"Assembled chapter {chapter_idx+1}/{len(chapter_files)}: {chapter_name_display}"
+        yield f"Assembled chapter: {chapter_file}"
+
+        # Clean up the temporary file list
+        os.remove(chapter_lines_list)
 
     chapter_assembly_bar.close()
-    yield "Completed assembling all chapters"
 
     # Post-processing steps
     post_processing_bar = tqdm(
@@ -663,23 +729,23 @@ async def generate_audio_with_multiple_voices(
     )
 
     # Add silence to each chapter file
-    for chapter_idx, chapter in enumerate(chapter_files):
+    for chapter_file in chapter_files:
         add_silence_to_audio_file_by_appending_pre_generated_silence(
-            temp_audio_dir, chapter
+            temp_audio_dir, chapter_file, CHAPTER_FORMAT
         )
         post_processing_bar.update(1)
-        yield f"Added silence to chapter {chapter_idx+1}/{len(chapter_files)}"
+        yield f"Added silence to chapter: {chapter_file}"
 
     m4a_chapter_files = []
 
     # Convert all chapter files to M4A format
-    for chapter_idx, chapter in enumerate(chapter_files):
-        chapter_name = chapter.split(".")[0]
+    for chapter_file in chapter_files:
+        chapter_name = chapter_file.split(f".{CHAPTER_FORMAT}")[0]
         m4a_chapter_files.append(f"{chapter_name}.m4a")
-        # Convert to M4A as raw AAC have problems with timestamps and metadata
-        convert_audio_file_formats("aac", "m4a", temp_audio_dir, chapter_name)
+        # Convert to M4A as raw WAV/AAC have problems with timestamps and metadata
+        convert_audio_file_formats(CHAPTER_FORMAT, "m4a", temp_audio_dir, chapter_name)
         post_processing_bar.update(1)
-        yield f"Converted chapter {chapter_idx+1}/{len(chapter_files)} to M4A"
+        yield f"Converted chapter: {chapter_file}"
 
     post_processing_bar.close()
 
