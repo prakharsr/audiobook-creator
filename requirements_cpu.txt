@@ -12,7 +12,7 @@ compressed-rtf==1.0.6
 distro==1.9.0
 docx2txt==0.8
 ebcdic==1.1.1
-extract-msg==0.29.0
+extract-msg
 fastapi==0.115.11
 ffmpy==0.5.0
 filelock==3.17.0

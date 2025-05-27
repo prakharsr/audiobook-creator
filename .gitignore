@@ -4,7 +4,9 @@ generated_audiobooks/
 model_cache/
 audio_samples/
 temp_audio/
+temp/
 todo.md
 .venv/
 .DS_Store
 .env
+*.m4a

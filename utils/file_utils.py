@@ -20,6 +20,45 @@ import os
 import json
 import shutil
 import traceback
+import wave
+
+def concatenate_audio_files(audio_files, output_file, input_format):
+    """
+    Concatenates multiple audio files into a single audio file.
+    """
+    if not audio_files:
+        raise ValueError("No audio files provided")
+
+    if not output_file:
+        raise ValueError("No output file provided")
+
+    if input_format == "wav":
+        concatenate_wav_files(audio_files, output_file)
+    else:
+        try:
+            audio_buffer = bytearray()
+            for audio_file in audio_files:
+                with open(audio_file, "rb") as f:
+                    audio_buffer.extend(f.read())
+            with open(output_file, "wb") as f:
+                f.write(audio_buffer)
+        except Exception as e:
+            print(f"Error concatenating audio files: {e}")
+            raise e
+
+
+def concatenate_wav_files(part_files, output_path):
+    with wave.open(output_path, "wb") as output:
+        for i, part_file in enumerate(part_files):
+            with wave.open(part_file, "rb") as input_wave:
+                if i == 0:
+                    # Set parameters from first file
+                    output.setparams(input_wave.getparams())
+
+                # Read and write frames
+                frames = input_wave.readframes(input_wave.getnframes())
+                output.writeframes(frames)
+
 
 def empty_file(file_name):
     # Open the file in write mode to make it empty

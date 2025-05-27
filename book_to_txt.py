@@ -16,11 +16,13 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import os
 import re
 import sys
 import time
 import textract
 import traceback
+from config.constants import TEMP_DIR
 from utils.run_shell_commands import run_shell_command, check_if_calibre_is_installed
 
 def extract_text_from_book_using_textract(book_path):
@@ -169,7 +171,7 @@ def extract_main_content(text, start_marker="PROLOGUE", end_marker="ABOUT THE AU
         traceback.print_exc()
         print("Error", e, ", not extracting main content.")
         return text
-    
+
 def normalize_line_breaks(text):
     # Split the text into lines
     lines = text.splitlines()
@@ -187,22 +189,39 @@ def save_book(edited_text):
         fout.write(edited_text)
     return "📖 Book saved successfully as 'converted_book.txt'! You can now proceed to the next optional step (Identifying Characters) or move onto Audiobook generation"
 
+
 def process_book_and_extract_text(
     book_path: str,
-    text_decoding_option: str = "textract"
+    text_decoding_option: str = "textract",
+    title: str = "converted_book.txt",
 ):
+    print(f"🔄 Processing book: {book_path}")
     if text_decoding_option == "calibre":
         text: str = extract_text_from_book_using_calibre(book_path)
     else:
         text: str = extract_text_from_book_using_textract(book_path)
 
-    text = text.replace("\u201c", '"').replace("\u201d", '"').replace("\u2019", "'").replace("\u2018", "'")
+    text = (
+        text.replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2019", "'")
+        .replace("\u2018", "'")
+    )
     text = normalize_line_breaks(text)
     text = fix_unterminated_quotes(text)
 
-    with open("converted_book.txt", 'w', encoding='utf-8') as fout:
+    # Create the temp directory and book-specific subdirectory if they don't exist
+    book_temp_dir = os.path.join(TEMP_DIR, title)
+    os.makedirs(book_temp_dir, exist_ok=True)
+
+    # Save the text file inside the book directory
+    text_file_path = os.path.join(book_temp_dir, "converted_book.txt")
+    print(f"🔄 Saving book to {text_file_path}")
+
+    with open(text_file_path, "w", encoding="utf-8") as fout:
         fout.write(text)
         yield text
+
 
 def main():
     # Default book path
