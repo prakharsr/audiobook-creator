@@ -29,6 +29,8 @@ from generate_audiobook import process_audiobook_generation
 css = """
 .step-heading {font-size: 1.2rem; font-weight: bold; margin-bottom: 0.5rem}
 """
+from config.constants import TEMP_DIR
+
 
 app = FastAPI()
 
@@ -53,7 +55,9 @@ def text_extraction_wrapper(book_file, text_decoding_option, book_title):
     try:
         last_output = None
         # Pass through all yield values from the original function
-        for output in process_book_and_extract_text(book_file, text_decoding_option):
+        for output in process_book_and_extract_text(
+            book_file, text_decoding_option, book_title
+        ):
             last_output = output
             yield output  # Yield each progress update
 
@@ -78,7 +82,7 @@ def save_book_wrapper(text_content, book_title):
         return gr.Warning("Please enter a book title before saving.")
 
     try:
-        save_book(text_content)
+        save_book(text_content, book_title)
         return gr.Info(
             "📖 Book saved successfully as 'converted_book.txt'!", duration=10
         )

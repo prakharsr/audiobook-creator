@@ -410,18 +410,18 @@ async def generate_audio_files(
 
     # Check if converted book exists, if not, process the book first
     converted_book_path = f"{TEMP_DIR}/{book_title}/converted_book.txt"
-    if not os.path.exists(converted_book_path):
-        yield "Converting book to text format..."
-        # Import and use the book processing function
-        from book_to_txt import process_book_and_extract_text
+    # if not os.path.exists(converted_book_path):
+    #     yield "Converting book to text format..."
+    #     # Import and use the book processing function
+    #     from book_to_txt import process_book_and_extract_text
 
-        # Create the temp directory structure
-        os.makedirs(f"{TEMP_DIR}/{book_title}", exist_ok=True)
+    #     # Create the temp directory structure
+    #     os.makedirs(f"{TEMP_DIR}/{book_title}", exist_ok=True)
 
-        # Process the book and extract text
-        for text in process_book_and_extract_text(book_path, "textract", book_title):
-            pass  # The function saves the file automatically
-        yield "Book conversion completed"
+    #     # Process the book and extract text
+    #     for text in process_book_and_extract_text(book_path, "textract", book_title):
+    #         pass  # The function saves the file automatically
+    #     yield "Book conversion completed"
 
     with open(converted_book_path, "r", encoding="utf-8") as f:
         text = f.read()
@@ -437,12 +437,8 @@ async def generate_audio_files(
     if type.lower() == "multi_voice":
         print(f"Processing multi-voice lines")
         # Construct file paths within the book's temp directory
-        speaker_file_path = os.path.join(
-            TEMP_DIR, book_title, "speaker_attributed_book.jsonl"
-        )
-        character_map_file_path = os.path.join(
-            TEMP_DIR, book_title, "character_gender_map.json"
-        )
+        speaker_file_path = "speaker_attributed_book.jsonl"
+        character_map_file_path = "character_gender_map.json"
 
         # Check if the JSONL file exists
         if not os.path.exists(speaker_file_path):

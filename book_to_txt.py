@@ -184,8 +184,8 @@ def normalize_line_breaks(text):
     
     return normalized_text
 
-def save_book(edited_text):
-    with open("converted_book.txt", "w", encoding="utf-8") as fout:
+def save_book(edited_text, book_title):
+    with open(f"{TEMP_DIR}/{book_title}/converted_book.txt", "w", encoding="utf-8") as fout:
         fout.write(edited_text)
     return "📖 Book saved successfully as 'converted_book.txt'! You can now proceed to the next optional step (Identifying Characters) or move onto Audiobook generation"
 

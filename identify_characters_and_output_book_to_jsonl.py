@@ -28,40 +28,43 @@ from tqdm import tqdm
 import torch
 from gliner import GLiNER
 import warnings
+from config.constants import TEMP_DIR
 from utils.file_utils import write_jsons_to_jsonl_file, empty_file, write_json_to_file
 from utils.find_book_protagonist import find_book_protagonist
 from utils.llm_utils import check_if_have_to_include_no_think_token, check_if_llm_is_up
 from dotenv import load_dotenv
 from huggingface_hub import snapshot_download
 
+
 def download_with_progress(model_name):
     print(f"Starting download of {model_name}")
-    
+
     # Define cache directory
     cache_dir = os.path.join(os.getcwd(), "model_cache")
     os.makedirs(cache_dir, exist_ok=True)
-    
+
     # Log progress manually since tqdm might not work in Docker
     print("Download in progress - this may take several minutes...")
-    
+
     # Download without tqdm
     snapshot_download(
         repo_id=model_name,
         cache_dir=cache_dir,
         local_files_only=False,
-        local_dir=cache_dir
+        local_dir=cache_dir,
     )
-    
+
     print(f"Download complete for {model_name}")
-    
+
     # Load the model from cache
     return GLiNER.from_pretrained(model_name, cache_dir=cache_dir)
 
+
 load_dotenv()
 
-OPENAI_BASE_URL=os.environ.get("OPENAI_BASE_URL", "http://localhost:1234/v1")
-OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY", "lm-studio")
-OPENAI_MODEL_NAME=os.environ.get("OPENAI_MODEL_NAME", "qwen3-14b")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "http://localhost:1234/v1")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "lm-studio")
+OPENAI_MODEL_NAME = os.environ.get("OPENAI_MODEL_NAME", "qwen3-14b")
 
 # warnings.simplefilter("ignore")
 
@@ -84,17 +87,19 @@ else:
 
 print("✅ Model is ready!\n")
 
+
 def extract_dialogues(text):
     """Extract dialogue lines enclosed in quotes."""
     return re.findall(r'("[^"]+")', text)
 
+
 def identify_speaker_using_named_entity_recognition(
-    line_map: list[dict], 
-    index: int, 
-    line: str, 
-    prev_speaker: str, 
-    protagonist: str, 
-    character_gender_map: dict
+    line_map: list[dict],
+    index: int,
+    line: str,
+    prev_speaker: str,
+    protagonist: str,
+    character_gender_map: dict,
 ) -> str:
     """
     Identifies the speaker of a given line in a text using Named Entity Recognition (NER).
@@ -125,13 +130,44 @@ def identify_speaker_using_named_entity_recognition(
     labels = ["character", "person"]
 
     # Lists of pronouns for different person and gender references
-    first_person_person_single_references = ["i", "me", "my", "mine", "myself"]  # First person singular
-    first_person_person_collective_references = ["we", "us", "our", "ours", "ourselves"]  # First person collective
-    second_person_person_references = ["you", "your", "yours", "yourself", "yourselves"]  # Second person
+    first_person_person_single_references = [
+        "i",
+        "me",
+        "my",
+        "mine",
+        "myself",
+    ]  # First person singular
+    first_person_person_collective_references = [
+        "we",
+        "us",
+        "our",
+        "ours",
+        "ourselves",
+    ]  # First person collective
+    second_person_person_references = [
+        "you",
+        "your",
+        "yours",
+        "yourself",
+        "yourselves",
+    ]  # Second person
     third_person_male_references = ["he", "him", "his", "himself"]  # Third person male
-    third_person_female_references = ["she", "her", "hers", "herself"]  # Third person female
+    third_person_female_references = [
+        "she",
+        "her",
+        "hers",
+        "herself",
+    ]  # Third person female
     third_person_others_references = [
-        "they", "them", "their", "theirs", "themself", "themselves", "it", "its", "itself"
+        "they",
+        "them",
+        "their",
+        "theirs",
+        "themself",
+        "themselves",
+        "it",
+        "its",
+        "itself",
     ]  # Third person neutral/unknown
 
     # Extract character names based on gender from the character_gender_map
@@ -147,7 +183,7 @@ def identify_speaker_using_named_entity_recognition(
     # If no entity is found, check previous lines (up to 5 lines back) for context
     loop_index = index - 1
     while (entity is None) and loop_index >= max(0, index - 5):
-        prev_lines = "\n".join(x["line"] for x in line_map[loop_index: index])
+        prev_lines = "\n".join(x["line"] for x in line_map[loop_index:index])
         text = f"{prev_lines}\n{current_line}"
         entities = gliner_model.predict_entities(text, labels)
         entity = entities[0] if len(entities) > 0 else None
@@ -171,15 +207,21 @@ def identify_speaker_using_named_entity_recognition(
         speaker = prev_speaker
     elif entity["text"].lower() in third_person_male_references:
         # Third-person male pronouns refer to the last mentioned male character
-        last_male_character = male_characters[-1] if len(male_characters) > 0 else "unknown"
+        last_male_character = (
+            male_characters[-1] if len(male_characters) > 0 else "unknown"
+        )
         speaker = last_male_character
     elif entity["text"].lower() in third_person_female_references:
         # Third-person female pronouns refer to the last mentioned female character
-        last_female_character = female_characters[-1] if len(female_characters) > 0 else "unknown"
+        last_female_character = (
+            female_characters[-1] if len(female_characters) > 0 else "unknown"
+        )
         speaker = last_female_character
     elif entity["text"].lower() in third_person_others_references:
         # Third-person neutral/unknown pronouns refer to the last mentioned neutral/unknown character
-        last_other_character = other_characters[-1] if len(other_characters) > 0 else "unknown"
+        last_other_character = (
+            other_characters[-1] if len(other_characters) > 0 else "unknown"
+        )
         speaker = last_other_character
     else:
         # If the entity is not a pronoun, use the entity text as the speaker
@@ -187,7 +229,10 @@ def identify_speaker_using_named_entity_recognition(
 
     return speaker.lower()
 
-async def identify_character_gender_and_age_using_llm_and_assign_score(character_name, index, lines):
+
+async def identify_character_gender_and_age_using_llm_and_assign_score(
+    character_name, index, lines
+):
     """
     Identifies a character's gender and age using a Language Model (LLM) and assigns a gender score.
 
@@ -203,7 +248,7 @@ async def identify_character_gender_and_age_using_llm_and_assign_score(character
 
     try:
         # Extract a window of dialogues around the character's line for context
-        character_dialogues = lines[max(0, index - 2):index + 5]
+        character_dialogues = lines[max(0, index - 2) : index + 5]
         text_character_dialogues = "\n".join(character_dialogues)
 
         no_think_token = check_if_have_to_include_no_think_token()
@@ -217,7 +262,9 @@ async def identify_character_gender_and_age_using_llm_and_assign_score(character
         Return only the gender and age as the output. Dont give any explanation or doubt. 
         Give the output as a string in the following format:
         Age: <age>
-        Gender: <gender>""".format(no_think_token=no_think_token)
+        Gender: <gender>""".format(
+            no_think_token=no_think_token
+        )
 
         # User prompt containing the character name and dialogue context
         user_prompt = f"""
@@ -231,9 +278,9 @@ async def identify_character_gender_and_age_using_llm_and_assign_score(character
             model=model_name,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
+                {"role": "user", "content": user_prompt},
             ],
-            temperature=0.2
+            temperature=0.2,
         )
 
         # Extract and clean the LLM's response
@@ -262,35 +309,46 @@ async def identify_character_gender_and_age_using_llm_and_assign_score(character
             if age == "child":
                 gender_score = 4  # Slightly masculine for male children
             elif age == "adult":
-                gender_score = random.choice([1, 2, 3])  # Mostly to completely masculine for male adults
+                gender_score = random.choice(
+                    [1, 2, 3]
+                )  # Mostly to completely masculine for male adults
             elif age == "elderly":
-                gender_score = random.choice([1, 2])  # Mostly to completely masculine for elderly males
+                gender_score = random.choice(
+                    [1, 2]
+                )  # Mostly to completely masculine for elderly males
         elif gender == "female":
             if age == "child":
                 gender_score = 10  # Completely feminine for female children
             elif age == "adult":
-                gender_score = random.choice([7, 8, 9])  # Mostly to completely feminine for female adults
+                gender_score = random.choice(
+                    [7, 8, 9]
+                )  # Mostly to completely feminine for female adults
             elif age == "elderly":
-                gender_score = random.choice([6, 7])  # Slightly to moderately feminine for elderly females
+                gender_score = random.choice(
+                    [6, 7]
+                )  # Slightly to moderately feminine for elderly females
 
         # Compile character information into a dictionary
         character_info = {
             "name": character_name,
             "age": age,
             "gender": gender,
-            "gender_score": gender_score
+            "gender_score": gender_score,
         }
         return character_info
     except Exception as e:
-        print(f"Error: {e}. Defaulting to 'adult' age and 'unknown' gender in response.")
+        print(
+            f"Error: {e}. Defaulting to 'adult' age and 'unknown' gender in response."
+        )
         traceback.print_exc()
         character_info = {
             "name": character_name,
             "age": "adult",
             "gender": "unknown",
-            "gender_score": 5
+            "gender_score": 5,
         }
         return character_info
+
 
 async def identify_characters_and_output_book_to_jsonl(text: str, protagonist):
     """
@@ -314,7 +372,7 @@ async def identify_characters_and_output_book_to_jsonl(text: str, protagonist):
     # Clear the output JSONL file
     empty_file("speaker_attributed_book.jsonl")
 
-    yield("Identifying Characters. Progress 0%")
+    yield ("Identifying Characters. Progress 0%")
 
     # Initialize a set to track known characters
     known_characters = set()
@@ -331,16 +389,16 @@ async def identify_characters_and_output_book_to_jsonl(text: str, protagonist):
             "7": "moderately feminine",
             "8": "mostly feminine",
             "9": "almost completely feminine",
-            "10": "completely feminine"
+            "10": "completely feminine",
         },
         "scores": {
             "narrator": {
                 "name": "narrator",
                 "age": "adult",
-                "gender": "female", # or male based on the user's selection in audiobook generation step 
-                "gender_score": 0  # Default score for the narrator
+                "gender": "female",  # or male based on the user's selection in audiobook generation step
+                "gender_score": 0,  # Default score for the narrator
             }
-        }
+        },
     }
 
     # Split the text into lines and extract dialogues
@@ -351,7 +409,11 @@ async def identify_characters_and_output_book_to_jsonl(text: str, protagonist):
     dialogue_last_index = 0  # Track the last processed dialogue index
 
     # Process each line in the text with a progress bar
-    with tqdm(total=len(lines), unit="line", desc="Identifying Characters Using Named Entity Recognition and assigning gender scores using LLM : ") as overall_pbar:
+    with tqdm(
+        total=len(lines),
+        unit="line",
+        desc="Identifying Characters Using Named Entity Recognition and assigning gender scores using LLM : ",
+    ) as overall_pbar:
         for index, line in enumerate(lines):
             try:
                 # Skip empty lines
@@ -369,7 +431,14 @@ async def identify_characters_and_output_book_to_jsonl(text: str, protagonist):
 
                 # If the line contains a dialogue, identify the speaker
                 if dialogue:
-                    speaker = identify_speaker_using_named_entity_recognition(line_map, index, line, prev_speaker, protagonist, character_gender_map)
+                    speaker = identify_speaker_using_named_entity_recognition(
+                        line_map,
+                        index,
+                        line,
+                        prev_speaker,
+                        protagonist,
+                        character_gender_map,
+                    )
 
                     # Add the speaker and line to the line map
                     line_map.append({"speaker": speaker, "line": line})
@@ -377,7 +446,11 @@ async def identify_characters_and_output_book_to_jsonl(text: str, protagonist):
                     # If the speaker is new, assign gender and age scores using LLM
                     if speaker not in known_characters:
                         known_characters.add(speaker)
-                        character_gender_map["scores"][speaker] = await identify_character_gender_and_age_using_llm_and_assign_score(speaker, index, lines)
+                        character_gender_map["scores"][speaker] = (
+                            await identify_character_gender_and_age_using_llm_and_assign_score(
+                                speaker, index, lines
+                            )
+                        )
 
                     prev_speaker = speaker
                 else:
@@ -401,34 +474,51 @@ async def identify_characters_and_output_book_to_jsonl(text: str, protagonist):
 
     yield "Character Identification Completed. You can now move onto the next step (Audiobook generation)."
 
-async def process_book_and_identify_characters(book_name):
+
+async def process_book_and_identify_characters(book_title):
+    converted_book_path = f"{TEMP_DIR}/{book_title}/converted_book.txt"
+    if not os.path.exists(converted_book_path):
+        raise Exception(f"Converted book not found at {converted_book_path}")
+    f = open(converted_book_path, "r", encoding="utf-8")
+    book_text = f.read()
+
     is_llm_up, message = await check_if_llm_is_up(async_openai_client, model_name)
 
     if not is_llm_up:
         raise Exception(message)
 
     yield "Finding protagonist. Please wait..."
-    protagonist = await find_book_protagonist(book_name, async_openai_client, model_name)
-    f = open("converted_book.txt", "r", encoding='utf-8')
-    book_text = f.read()
+    protagonist = await find_book_protagonist(
+        book_title, async_openai_client, model_name
+    )
     yield f"Found protagonist: {protagonist}"
     await asyncio.sleep(1)
 
-    async for update in identify_characters_and_output_book_to_jsonl(book_text, protagonist):
+    async for update in identify_characters_and_output_book_to_jsonl(
+        book_text, protagonist
+    ):
         yield update
 
-async def main():
-    f = open("converted_book.txt", "r", encoding='utf-8')
+
+async def main(book_title: str):
+    converted_book_path = f"{TEMP_DIR}/{book_title}/converted_book.txt"
+    if not os.path.exists(converted_book_path):
+        raise Exception(f"Converted book not found at {converted_book_path}")
+    f = open(converted_book_path, "r", encoding="utf-8")
     book_text = f.read()
 
     # Ask for the protagonist's name
     print("\n📖 **Character Identification Setup**")
-    protagonist = input("🔹 Enter the name of the **protagonist** (Check from Wikipedia if needed): ").strip()
+    protagonist = input(
+        "🔹 Enter the name of the **protagonist** (Check from Wikipedia if needed): "
+    ).strip()
 
     # Start processing
     start_time = time.time()
     print("\n🔍 Identifying characters and processing the book...")
-    async for update in identify_characters_and_output_book_to_jsonl(book_text, protagonist):
+    async for update in identify_characters_and_output_book_to_jsonl(
+        book_text, protagonist
+    ):
         print(update)
     end_time = time.time()
 
@@ -441,6 +531,7 @@ async def main():
     print("🎧 Next, run the following script to generate the audiobook:")
     print("   ➜ `python generate_audiobook.py`")
     print("\n🚀 Happy audiobook creation!\n")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
