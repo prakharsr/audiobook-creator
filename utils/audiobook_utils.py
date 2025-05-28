@@ -194,24 +194,26 @@ def generate_chapters_file(
         output_file (str): The path to the output chapter metadata file. Defaults to "chapters.txt".
     """
     start_time = 0
-    with open(f"{TEMP_DIR}/{book_title}/{output_file}", "w", encoding="utf-8") as f:
+    output_metadata_path = os.path.join(TEMP_DIR, book_title, output_file)
+
+    with open(output_metadata_path, "w", encoding="utf-8") as f:
         f.write(";FFMETADATA1\n")
         for chapter in chapter_files:
-            duration = get_audio_duration_using_ffprobe(
-                os.path.join(TEMP_DIR, book_title, chapter)
-            )
-            end_time = start_time + duration
+            chapter_path = os.path.join(TEMP_DIR, book_title, chapter)
+            if not os.path.exists(chapter_path):
+                raise FileNotFoundError(f"Chapter file not found: {chapter_path}")
 
-            # Write the chapter metadata to the file
+            try:
+                duration = get_audio_duration_using_ffprobe(chapter_path)
+            except Exception as e:
+                raise RuntimeError(f"Failed to get duration for {chapter}: {e}")
+
+            end_time = start_time + duration
             f.write("[CHAPTER]\n")
             f.write("TIMEBASE=1/1000\n")
             f.write(f"START={start_time}\n")
             f.write(f"END={end_time}\n")
-            f.write(
-                f"title={os.path.splitext(chapter)[0]}\n\n"
-            )  # Use filename as chapter title
-
-            # Update the start time for the next chapter
+            f.write(f"title={os.path.splitext(chapter)[0]}\n\n")
             start_time = end_time
 
 
