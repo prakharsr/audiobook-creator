@@ -1044,7 +1044,8 @@ async def main():
         "\n📖 Enter the **title of the book**, needed for metadata and cover extraction. (Press Enter to use default): "
     ).strip()
     if not book_title:
-        book_title = "audiobook"
+        print("\n⚠️ Book title is required! Please enter a valid book title.")
+        return
 
     if voice_option == "1":
         print("\n🎧 Generating audiobook with a **single voice**...")

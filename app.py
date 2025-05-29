@@ -168,7 +168,7 @@ async def generate_audiobook_wrapper(
         ), None
         yield last_output, audiobook_path
         print(
-            f"\n🎧 Audiobook is generated ! The audiobook is saved as **audiobook.{file_extension}** in the **generated_audiobooks** directory in the current folder."
+            f"\n🎧 Audiobook is generated ! The audiobook is saved as **{book_title}.{file_extension}** in the **generated_audiobooks** directory in the current folder."
         )
         return
     except Exception as e:
