@@ -30,7 +30,6 @@ import sys
 from config.constants import (
     MODEL,
     TEMP_DIR,
-    VOICE_MAP,
     BASE_URL,
     API_KEY,
     MAX_PARALLEL_REQUESTS_BATCH_SIZE,
@@ -232,17 +231,18 @@ def concatenate_chapters(
 ):
     """
     Concatenates the chapters into a single audiobook file.
+    Returns a list of full paths to the assembled chapter audio files.
     """
     # Third pass: Concatenate audio files for each chapter in order
     chapter_assembly_bar = tqdm(
         total=len(chapter_files), unit="chapter", desc="Assembling Chapters"
     )
 
-    def assemble_single_chapter(chapter_file):
+    def assemble_single_chapter(chapter_filename_simple): # Renamed for clarity
         # Create a temporary file list for this chapter's lines
         chapter_lines_list = os.path.join(
             f"{TEMP_DIR}/{book_title}",
-            f"chapter_lines_list_{chapter_file.replace('/', '_').replace('.', '_')}.txt",
+            f"chapter_lines_list_{chapter_filename_simple.replace('/', '_').replace('.', '_')}.txt",
         )
 
         # Delete the chapter_lines_list file if it exists
@@ -250,125 +250,151 @@ def concatenate_chapters(
             os.remove(chapter_lines_list)
 
         with open(chapter_lines_list, "w", encoding="utf-8") as f:
-            for line_index in sorted(chapter_line_map[chapter_file]):
+            for line_index in sorted(chapter_line_map[chapter_filename_simple]):
                 line_audio_path = os.path.join(
                     temp_line_audio_dir, f"line_{line_index:06d}.{API_OUTPUT_FORMAT}"
                 )
                 # Use absolute path to prevent path duplication issues
                 f.write(f"file '{os.path.abspath(line_audio_path)}'\n")
+        
+        output_chapter_full_path = os.path.join(TEMP_DIR, book_title, chapter_filename_simple)
 
         # Use FFmpeg to concatenate the lines with optimized parameters
         if MODEL == "orpheus":
             # For Orpheus, convert WAV segments to M4A chapters directly with timestamp filtering
             ffmpeg_cmd = (
                 f'ffmpeg -y -f concat -safe 0 -i "{chapter_lines_list}" '
-                f'-c:a aac -b:a 256k -ar 44100 -ac 2 -avoid_negative_ts make_zero -fflags +genpts -threads 0 "{TEMP_DIR}/{book_title}/{chapter_file}"'
+                f'-c:a aac -b:a 256k -ar 44100 -ac 2 -avoid_negative_ts make_zero -fflags +genpts -threads 0 "{output_chapter_full_path}"'
             )
         else:
-            # For other models, use re-encoding with timestamp filtering to prevent truncation
-            ffmpeg_cmd = f'ffmpeg -y -f concat -safe 0 -i "{chapter_lines_list}" -c:a aac -b:a 256k -avoid_negative_ts make_zero -fflags +genpts -threads 0 "{TEMP_DIR}/{book_title}/{chapter_file}"'
+            # Kokoro output is aac format
+            ffmpeg_cmd = f'ffmpeg -y -f concat -safe 0 -i "{chapter_lines_list}" -c:a aac -b:a 256k -avoid_negative_ts make_zero -fflags +genpts -threads 0 "{output_chapter_full_path}"'
 
         try:
             result = subprocess.run(
                 ffmpeg_cmd, shell=True, check=True, capture_output=True, text=True
             )
-            print(f"[DEBUG] FFmpeg stdout: {result.stdout}")
-            print(f"[DEBUG] FFmpeg stderr: {result.stderr}")
+            # print(f"[DEBUG] FFmpeg stdout: {result.stdout}") # Usually too verbose
+            # print(f"[DEBUG] FFmpeg stderr: {result.stderr}") # Usually too verbose unless debugging
         except subprocess.CalledProcessError as e:
-            print(f"[ERROR] FFmpeg failed for {chapter_file}:")
+            print(f"[ERROR] FFmpeg failed for {chapter_filename_simple}:")
             print(f"[ERROR] Command: {ffmpeg_cmd}")
             print(f"[ERROR] Stdout: {e.stdout}")
             print(f"[ERROR] Stderr: {e.stderr}")
             raise e
 
-        print(f"Assembled chapter: {chapter_file}")
+        # print(f"Assembled chapter: {output_chapter_full_path}") # Keep if useful for progress, or rely on tqdm
 
         # Clean up the temporary file list
         os.remove(chapter_lines_list)
-        return chapter_file
+        return output_chapter_full_path # Return the full path
 
     # Process chapters in parallel (limit to 4 concurrent to avoid overwhelming system)
     import concurrent.futures
 
-    max_workers = min(4, len(chapter_files))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(assemble_single_chapter, chapter_file)
-            for chapter_file in chapter_files
-        ]
+    max_workers = min(4, os.cpu_count() or 1, len(chapter_files)) # More robust max_workers
+    if max_workers == 0 and len(chapter_files) > 0: # Ensure at least one worker if there are files
+        max_workers = 1
+    
+    assembled_chapter_full_paths_ordered = [None] * len(chapter_files)
 
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                chapter_file = future.result()
-                chapter_assembly_bar.update(1)
-            except Exception as e:
-                print(f"Error assembling chapter: {e}")
-                raise e
-
-    chapter_assembly_bar.close()
-
-
-async def parallel_post_processing(chapter_files, book_title, output_format):
-    """
-    Parallel post-processing of chapter files to add silence and convert formats.
-    """
-
-    print(
-        f"chapter_files: {chapter_files}, book_title: {book_title}, output_format: {output_format}"
-    )
-
-    def process_single_chapter(chapter_file):
-        # Add silence to chapter file
-
-        # Convert to M4A format if needed
-        chapter_name = chapter_file.split(f".{output_format}")[0]
-        m4a_chapter_file = f"{chapter_name}.m4a"
-
-        # Only convert if not already in M4A format
-        if not chapter_file.endswith(".m4a"):
-            convert_audio_file_formats(
-                output_format, "m4a", f"{TEMP_DIR}/{book_title}", chapter_name
-            )
-        else:
-            m4a_chapter_file = chapter_file
-
-        add_silence_to_audio_file_by_appending_silence_file(m4a_chapter_file)
-
-        return m4a_chapter_file
-
-    # Process chapters in parallel (limit to 4 concurrent to avoid overwhelming system)
-    import concurrent.futures
-
-    max_workers = min(4, len(chapter_files))
-    # Initialize list to store results in the correct order
-    m4a_chapter_files = [None] * len(chapter_files)
-
-    post_processing_bar = tqdm(
-        total=len(chapter_files), unit="chapter", desc="Post Processing (Parallel)"
-    )
-
-    if not chapter_files:  # Handle empty list gracefully
-        post_processing_bar.close()
+    if not chapter_files: # Handle empty list gracefully
+        chapter_assembly_bar.close()
         return []
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Map futures to their original index to ensure order is preserved
         future_to_index = {
-            executor.submit(process_single_chapter, chapter_files[i]): i
+            executor.submit(assemble_single_chapter, chapter_files[i]): i
             for i in range(len(chapter_files))
         }
 
         for future in concurrent.futures.as_completed(future_to_index):
             original_index = future_to_index[future]
             try:
-                processed_m4a_file = future.result()
-                m4a_chapter_files[original_index] = processed_m4a_file
-                post_processing_bar.update(1)
+                processed_full_path = future.result()
+                assembled_chapter_full_paths_ordered[original_index] = processed_full_path
+                chapter_assembly_bar.update(1)
             except Exception as e:
-                # Log the specific chapter that failed if possible
                 failed_chapter_name = "unknown"
                 if original_index < len(chapter_files):
                     failed_chapter_name = chapter_files[original_index]
+                print(f"Error assembling chapter {failed_chapter_name}: {e}")
+                chapter_assembly_bar.close() # Ensure bar is closed on error
+                raise e
+
+    chapter_assembly_bar.close()
+    return assembled_chapter_full_paths_ordered # Return list of full paths
+
+
+async def parallel_post_processing(chapter_full_paths, book_title, output_format):
+    """
+    Parallel post-processing of chapter files (given as full paths)
+    to add silence and convert formats.
+    Returns a list of simple filenames of the processed M4A files,
+    which reside in TEMP_DIR/book_title/.
+    """
+
+   
+    def process_single_chapter(current_chapter_full_path): 
+        chapter_dir = os.path.dirname(current_chapter_full_path) 
+        chapter_filename_simple_original = os.path.basename(current_chapter_full_path) 
+
+        original_format = chapter_filename_simple_original.split(".")[-1]
+        base_name = os.path.splitext(chapter_filename_simple_original)[0] 
+
+        
+        m4a_full_path_in_temp = os.path.join(chapter_dir, f"{base_name}.m4a") 
+        processed_m4a_simple_filename = f"{base_name}.m4a" 
+
+        # Only convert if not already in M4A format
+        if original_format.lower() != "m4a":
+           
+            convert_audio_file_formats(
+                original_format, "m4a", 
+                chapter_dir, # folder_path for conversion
+                base_name    # file_name for conversion (without original extension)
+            )
+          
+        add_silence_to_audio_file_by_appending_silence_file(m4a_full_path_in_temp)
+
+        return processed_m4a_simple_filename # Return the simple filename of the processed .m4a file
+
+    # Process chapters in parallel
+    import concurrent.futures
+
+    max_workers = min(4, os.cpu_count() or 1, len(chapter_full_paths))
+    if max_workers == 0 and len(chapter_full_paths) > 0:
+        max_workers = 1
+
+    # Initialize list to store results (simple filenames) in the correct order
+    processed_m4a_simple_filenames_ordered = [None] * len(chapter_full_paths)
+
+    post_processing_bar = tqdm(
+        total=len(chapter_full_paths), unit="chapter", desc="Post Processing (Parallel)"
+    )
+
+    if not chapter_full_paths:  # Handle empty list gracefully
+        post_processing_bar.close()
+        return []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Map futures to their original index to ensure order is preserved
+        future_to_index = {
+            executor.submit(process_single_chapter, chapter_full_paths[i]): i
+            for i in range(len(chapter_full_paths))
+        }
+
+        for future in concurrent.futures.as_completed(future_to_index):
+            original_index = future_to_index[future]
+            try:
+                processed_simple_filename = future.result()
+                processed_m4a_simple_filenames_ordered[original_index] = processed_simple_filename
+                post_processing_bar.update(1)
+            except Exception as e:
+                failed_chapter_name = "unknown"
+                if original_index < len(chapter_full_paths):
+                    failed_chapter_name = os.path.basename(chapter_full_paths[original_index])
                 print(
                     f"Error in post-processing for chapter {failed_chapter_name}: {e}"
                 )
@@ -377,7 +403,7 @@ async def parallel_post_processing(chapter_files, book_title, output_format):
 
     post_processing_bar.close()
 
-    return m4a_chapter_files
+    return processed_m4a_simple_filenames_ordered
 
 
 async def generate_audio_files(
@@ -538,7 +564,8 @@ async def generate_audio_files(
     if MODEL == "orpheus":
         current_chapter_audio = "Introduction.m4a"
     else:
-        current_chapter_audio = f"Introduction.{output_format}"
+        # kokoro output is aac format
+        current_chapter_audio = f"Introduction.aac"
     chapter_files = []
 
     resume_index = 0
@@ -817,6 +844,7 @@ async def generate_audio_files(
     chapter_organization_bar = tqdm(
         total=len(results), unit="result", desc="Organizing Chapters"
     )
+    
 
     for result in sorted(results, key=lambda x: x["index"]):
         # Check if this is a chapter heading
@@ -826,8 +854,9 @@ async def generate_audio_files(
             if MODEL == "orpheus":
                 current_chapter_audio = f"{sanitize_filename(result['line'])}.m4a"
             else:
+                # kokoro does output is aac format
                 current_chapter_audio = (
-                    f"{sanitize_filename(result['line'])}.{output_format}"
+                    f"{sanitize_filename(result['line'])}.aac"
                 )
 
         if current_chapter_audio not in chapter_files:
@@ -840,18 +869,21 @@ async def generate_audio_files(
 
     chapter_organization_bar.close()
     yield "Organizing audio by chapters complete"
+    
 
-    concatenate_chapters(
+    chapter_files = concatenate_chapters(
         chapter_files, book_title, chapter_line_map, temp_line_audio_dir
     )
-
+    
+    
     # Optimized parallel post-processing
     yield "Starting parallel post-processing..."
-    m4a_chapter_files = await parallel_post_processing(
+    chapter_files = await parallel_post_processing(
         chapter_files, book_title, output_format
     )
-    yield f"Completed parallel post-processing of {len(m4a_chapter_files)} chapters"
-
+    yield f"Completed parallel post-processing of {len(chapter_files)} chapters"
+ 
+    
     # Clean up temp line audio files -- commented out to allow for generation of different formats of the audiobook without re-generating the audio files
     # shutil.rmtree(temp_line_audio_dir)
     # yield "Cleaned up temporary files"
@@ -862,15 +894,15 @@ async def generate_audio_files(
     if generate_m4b_audiobook_file:
         # Merge all chapter files into a final m4b audiobook
         yield "Creating M4B audiobook file..."
-        merge_chapters_to_m4b(book_path, m4a_chapter_files, book_title)
+        merge_chapters_to_m4b(book_path, chapter_files, book_title)
         # clean the temp directory
-        if os.path.exists(f"{TEMP_DIR}/{book_title}"):
-            shutil.rmtree(f"{TEMP_DIR}/{book_title}")
+        # if os.path.exists(f"{TEMP_DIR}/{book_title}"):
+        #     shutil.rmtree(f"{TEMP_DIR}/{book_title}")
         yield "M4B audiobook created successfully"
     else:
         # Merge all chapter files into a standard M4A audiobook
         yield "Creating final audiobook..."
-        merge_chapters_to_standard_audio_file(m4a_chapter_files, book_title)
+        merge_chapters_to_standard_audio_file(chapter_files, book_title)
 
         # already converted to m4a in the parallel post-processing step
         convert_audio_file_formats(

@@ -221,7 +221,14 @@ def create_m4a_file_from_raw_aac_file(input_file_path, output_file_path):
     cmd = ["ffmpeg", "-y", "-i", input_file_path, "-c", "copy", output_file_path]
 
     try:
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error creating M4A from AAC: {e}")
+        print(f"FFmpeg command: {' '.join(cmd)}")
+        print(f"FFmpeg stdout: {e.stdout}")
+        print(f"FFmpeg stderr: {e.stderr}")
+        traceback.print_exc()
+        return None
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -242,7 +249,14 @@ def create_m4a_file_from_wav_file(input_file_path, output_file_path):
     ]
 
     try:
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error creating M4A from WAV: {e}")
+        print(f"FFmpeg command: {' '.join(cmd)}")
+        print(f"FFmpeg stdout: {e.stdout}")
+        print(f"FFmpeg stderr: {e.stderr}")
+        traceback.print_exc()
+        return None
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -253,7 +267,14 @@ def create_aac_file_from_m4a_file(input_file_path, output_file_path):
     cmd = ["ffmpeg", "-y", "-i", input_file_path, "-c", "copy", output_file_path]
 
     try:
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error creating AAC from M4A: {e}")
+        print(f"FFmpeg command: {' '.join(cmd)}")
+        print(f"FFmpeg stdout: {e.stdout}")
+        print(f"FFmpeg stderr: {e.stderr}")
+        traceback.print_exc()
+        return None
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -261,20 +282,20 @@ def create_aac_file_from_m4a_file(input_file_path, output_file_path):
 
 
 def create_mp3_file_from_m4a_file(input_file_path, output_file_path):
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        input_file_path,
-        "-c:a",
-        "libmp3lame",
-        "-b:a",
-        "128k",
-        output_file_path,
-    ]
+    cmd_str = (
+        f'ffmpeg -y -i "{input_file_path}" '
+        f'-c:a libmp3lame -b:a 128k "{output_file_path}"'
+    )
 
     try:
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd_str, shell=True, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error creating MP3 from M4A: {e}")
+        print(f"FFmpeg command: {cmd_str}")
+        print(f"FFmpeg stdout: {e.stdout}")
+        print(f"FFmpeg stderr: {e.stderr}")
+        traceback.print_exc()
+        return None
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -295,7 +316,14 @@ def create_wav_file_from_m4a_file(input_file_path, output_file_path):
     ]
 
     try:
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error creating WAV from M4A: {e}")
+        print(f"FFmpeg command: {' '.join(cmd)}")
+        print(f"FFmpeg stdout: {e.stdout}")
+        print(f"FFmpeg stderr: {e.stderr}")
+        traceback.print_exc()
+        return None
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -316,7 +344,14 @@ def create_opus_file_from_m4a_file(input_file_path, output_file_path):
     ]
 
     try:
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error creating OPUS from M4A: {e}")
+        print(f"FFmpeg command: {' '.join(cmd)}")
+        print(f"FFmpeg stdout: {e.stdout}")
+        print(f"FFmpeg stderr: {e.stderr}")
+        traceback.print_exc()
+        return None
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -327,7 +362,14 @@ def create_flac_file_from_m4a_file(input_file_path, output_file_path):
     cmd = ["ffmpeg", "-y", "-i", input_file_path, "-c:a", "flac", output_file_path]
 
     try:
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error creating FLAC from M4A: {e}")
+        print(f"FFmpeg command: {' '.join(cmd)}")
+        print(f"FFmpeg stdout: {e.stdout}")
+        print(f"FFmpeg stderr: {e.stderr}")
+        traceback.print_exc()
+        return None
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -352,7 +394,14 @@ def create_pcm_file_from_m4a_file(input_file_path, output_file_path):
     ]
 
     try:
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error creating PCM from M4A: {e}")
+        print(f"FFmpeg command: {' '.join(cmd)}")
+        print(f"FFmpeg stdout: {e.stdout}")
+        print(f"FFmpeg stderr: {e.stderr}")
+        traceback.print_exc()
+        return None
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -402,6 +451,7 @@ def merge_chapters_to_m4b(book_path, chapter_files, book_title="audiobook"):
         for chapter in chapter_files:
             print(chapter)
             f.write(f"file '{chapter}'\n")
+
 
     metadata = get_ebook_metadata_with_cover(book_path, book_title)
     title = escape_metadata(metadata.get("Title", ""))
@@ -454,7 +504,7 @@ def merge_chapters_to_m4b(book_path, chapter_files, book_title="audiobook"):
 
 def add_silence_to_audio_file_by_appending_silence_file(input_file_path):
     silence_path = "static_files/silence.aac"  # Pre generated 1 seconds of silence using command `ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 1 -c:a aac silence.aac`
-
+    print(f"Adding silence to {input_file_path}")
     with open(silence_path, "rb") as silence_file, open(
         input_file_path, "ab"
     ) as audio_file:
@@ -510,16 +560,10 @@ def merge_chapters_to_standard_audio_file(chapter_files, book_title="audiobook")
             )
             f.write(f"file '{abs_chapter_path}'\n")
 
-    # Use sanitized book title for filename to avoid issues with spaces
-    safe_book_title = "".join(
-        c for c in book_title if c.isalnum() or c in (" ", "-", "_")
-    ).rstrip()
-    safe_book_title = (
-        safe_book_title.replace(" ", "_") or "audiobook"
-    )  # Replace spaces with underscores
+    
 
     # Construct the output file path
-    output_file = f"generated_audiobooks/{safe_book_title}.m4a"
+    output_file = f"generated_audiobooks/{book_title}.m4a"
 
     # Use optimized FFmpeg parameters for faster processing
     # Use copy codec when possible to avoid re-encoding, add threading
