@@ -844,7 +844,6 @@ async def generate_audio_files(
     chapter_organization_bar = tqdm(
         total=len(results), unit="result", desc="Organizing Chapters"
     )
-    
 
     for result in sorted(results, key=lambda x: x["index"]):
         # Check if this is a chapter heading
@@ -875,7 +874,7 @@ async def generate_audio_files(
         chapter_files, book_title, chapter_line_map, temp_line_audio_dir
     )
     
-    
+
     # Optimized parallel post-processing
     yield "Starting parallel post-processing..."
     chapter_files = await parallel_post_processing(
@@ -883,7 +882,7 @@ async def generate_audio_files(
     )
     yield f"Completed parallel post-processing of {len(chapter_files)} chapters"
  
-    
+
     # Clean up temp line audio files -- commented out to allow for generation of different formats of the audiobook without re-generating the audio files
     # shutil.rmtree(temp_line_audio_dir)
     # yield "Cleaned up temporary files"
@@ -896,8 +895,7 @@ async def generate_audio_files(
         yield "Creating M4B audiobook file..."
         merge_chapters_to_m4b(book_path, chapter_files, book_title)
         # clean the temp directory
-        # if os.path.exists(f"{TEMP_DIR}/{book_title}"):
-        #     shutil.rmtree(f"{TEMP_DIR}/{book_title}")
+
         yield "M4B audiobook created successfully"
     else:
         # Merge all chapter files into a standard M4A audiobook
@@ -909,6 +907,11 @@ async def generate_audio_files(
             "m4a", output_format, "generated_audiobooks", book_title
         )
         yield f"Audiobook in {output_format} format created successfully"
+
+    # clean up temp directory
+    if os.path.exists(f"{TEMP_DIR}/{book_title}"):
+        shutil.rmtree(f"{TEMP_DIR}/{book_title}")
+    yield "Cleaned up temporary files"
 
 
 async def process_audiobook_generation(
