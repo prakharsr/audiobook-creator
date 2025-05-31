@@ -350,7 +350,7 @@ async def identify_character_gender_and_age_using_llm_and_assign_score(
         return character_info
 
 
-async def identify_characters_and_output_book_to_jsonl(text: str, protagonist):
+async def identify_characters_and_output_book_to_jsonl(text: str, protagonist, book_title):
     """
     Processes a given text to identify characters, assign gender scores, and output the results to JSONL files.
 
@@ -369,9 +369,17 @@ async def identify_characters_and_output_book_to_jsonl(text: str, protagonist):
         - speaker_attributed_book.jsonl: A JSONL file where each line contains a speaker and their corresponding dialogue or narration.
         - character_gender_map.json: A JSON file containing gender and age scores for each character.
     """
-    # Clear the output JSONL file
-    empty_file("speaker_attributed_book.jsonl")
 
+    # Ensure the book-specific temporary directory exists
+    book_temp_dir = os.path.join(TEMP_DIR, book_title)
+    os.makedirs(book_temp_dir, exist_ok=True)
+
+    speaker_file_path = os.path.join(book_temp_dir, "speaker_attributed_book.jsonl")
+    character_map_file_path = os.path.join(book_temp_dir, "character_gender_map.json")
+
+    # Clear the output JSONL file
+    empty_file(speaker_file_path)
+   
     yield ("Identifying Characters. Progress 0%")
 
     # Initialize a set to track known characters
@@ -467,10 +475,10 @@ async def identify_characters_and_output_book_to_jsonl(text: str, protagonist):
                 traceback.print_exc()
 
     # Write the processed lines to a JSONL file
-    write_jsons_to_jsonl_file(line_map, "speaker_attributed_book.jsonl")
+    write_jsons_to_jsonl_file(line_map, speaker_file_path)
 
     # Write the character gender and age scores to a JSON file
-    write_json_to_file(character_gender_map, "character_gender_map.json")
+    write_json_to_file(character_gender_map, character_map_file_path)
 
     yield "Character Identification Completed. You can now move onto the next step (Audiobook generation)."
 
@@ -495,7 +503,7 @@ async def process_book_and_identify_characters(book_title):
     await asyncio.sleep(1)
 
     async for update in identify_characters_and_output_book_to_jsonl(
-        book_text, protagonist
+        book_text, protagonist, book_title
     ):
         yield update
 
@@ -517,7 +525,7 @@ async def main(book_title: str):
     start_time = time.time()
     print("\n🔍 Identifying characters and processing the book...")
     async for update in identify_characters_and_output_book_to_jsonl(
-        book_text, protagonist
+        book_text, protagonist, book_title
     ):
         print(update)
     end_time = time.time()

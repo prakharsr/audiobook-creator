@@ -73,22 +73,44 @@ def sanitize_filename(text):
 
 def split_and_annotate_text(text):
     """Splits text into dialogue and narration while annotating each segment."""
-    parts = re.split(r'("[^"]+")', text)  # Keep dialogues in the split result
+    # Improved regex to handle quotes properly
+    parts = re.split(r'("[^"]*")', text)  # Keep dialogues in the split result
     annotated_parts = []
-
+    
     for part in parts:
-        if part:  # Ignore empty strings
-            annotated_parts.append(
-                {
-                    "text": part,
-                    "type": (
-                        "dialogue"
-                        if part.startswith('"') and part.endswith('"')
-                        else "narration"
-                    ),
-                }
-            )
-
+        if not part:  # Skip empty parts
+            continue
+            
+        # If part is a dialogue (starts and ends with quotes)
+        if part.startswith('"') and part.endswith('"'):
+            # Clean the dialogue text by removing quotes
+            dialogue_text = part[1:-1].strip()
+            
+            # Handle edge case: empty dialogue
+            if not dialogue_text:
+                continue
+                
+            annotated_parts.append({
+                "type": "dialogue",
+                "text": dialogue_text
+            })
+        else:
+            # Handle narration text
+            narration_text = part.strip()
+            
+            # Handle edge case: empty narration
+            if not narration_text:
+                continue
+                
+            # Add period if missing (improves audio generation)
+            if narration_text and not any(narration_text.endswith(p) for p in ".!?"):
+                narration_text += "."
+                
+            annotated_parts.append({
+                "type": "narration",
+                "text": narration_text
+            })
+    
     return annotated_parts
 
 
@@ -118,7 +140,7 @@ def check_if_chapter_heading(text):
     return False  # No match
 
 
-def find_voice_for_gender_score(character: str, character_gender_map, kokoro_voice_map):
+def find_voice_for_gender_score(character: str, character_gender_map, voice_map):
     """
     Finds the appropriate voice for a character based on their gender score.
 
@@ -129,7 +151,7 @@ def find_voice_for_gender_score(character: str, character_gender_map, kokoro_voi
     Args:
         character (str): The name of the character for whom the voice is being determined.
         character_gender_map (dict): A dictionary mapping character names to their gender scores.
-        kokoro_voice_map (dict): A dictionary mapping voice identifiers to gender scores.
+        voice_map (dict): A dictionary mapping voice identifiers to gender scores.
 
     Returns:
         str: The voice identifier that matches the character's gender score.
@@ -140,49 +162,10 @@ def find_voice_for_gender_score(character: str, character_gender_map, kokoro_voi
     character_gender_score = character_gender_score_doc["gender_score"]
 
     # Iterate over the voice identifiers and their scores
-    for voice, score in kokoro_voice_map.items():
+    for voice, score in voice_map.items():
         # Find the voice identifier that matches the character's gender score
         if score == character_gender_score:
             return voice
-
-
-def validate_and_clean_text_for_tts(text):
-    """
-    Validate and clean text before sending to TTS API.
-    Returns cleaned text or None if text should be skipped.
-    """
-    if not text:
-        return None
-
-    text = text.strip()
-    if not text:
-        return None
-
-    # Check for minimum meaningful content
-    if len(text) < 1:
-        return None
-
-    # Check if text has any speakable content (letters or numbers)
-    import re
-
-    if not re.search(r"[a-zA-Z0-9]", text):
-        # Only punctuation/symbols, might cause TTS issues
-        print(f"WARNING: Text contains no alphanumeric characters: '{text}'")
-        # Return None to skip this part, or add minimal content
-        if len(text) <= 5:  # Very short punctuation-only text
-            return None
-        else:
-            # Add minimal speakable content for longer punctuation
-            return f"Pause. {text}"
-
-    # Remove excessive whitespace
-    text = re.sub(r"\s+", " ", text).strip()
-
-    # Ensure minimum length for TTS
-    if len(text) < 2:
-        text = f"{text}."
-
-    return text
 
 
 def preprocess_text_for_orpheus(text):
@@ -436,18 +419,6 @@ async def generate_audio_files(
 
     # Check if converted book exists, if not, process the book first
     converted_book_path = f"{TEMP_DIR}/{book_title}/converted_book.txt"
-    # if not os.path.exists(converted_book_path):
-    #     yield "Converting book to text format..."
-    #     # Import and use the book processing function
-    #     from book_to_txt import process_book_and_extract_text
-
-    #     # Create the temp directory structure
-    #     os.makedirs(f"{TEMP_DIR}/{book_title}", exist_ok=True)
-
-    #     # Process the book and extract text
-    #     for text in process_book_and_extract_text(book_path, "textract", book_title):
-    #         pass  # The function saves the file automatically
-    #     yield "Book conversion completed"
 
     with open(converted_book_path, "r", encoding="utf-8") as f:
         text = f.read()
@@ -463,12 +434,16 @@ async def generate_audio_files(
     if type.lower() == "multi_voice":
         print(f"Processing multi-voice lines")
         # Construct file paths within the book's temp directory
-        speaker_file_path = "speaker_attributed_book.jsonl"
-        character_map_file_path = "character_gender_map.json"
+        multi_voice_book = os.path.join(
+            TEMP_DIR, book_title, "speaker_attributed_book.jsonl"
+        )
+        character_map_file_path = os.path.join(
+            TEMP_DIR, book_title, "character_gender_map.json"
+        )
 
         # Check if the JSONL file exists
-        if not os.path.exists(speaker_file_path):
-            yield f"Error: {speaker_file_path} not found. Please run identify_characters_and_output_book_to_jsonl.py first to generate speaker-attributed lines."
+        if not os.path.exists(multi_voice_book):
+            yield f"Error: {multi_voice_book} not found. Please run identify_characters_and_output_book_to_jsonl.py first to generate speaker-attributed lines."
             return
 
         # Check if the character map JSON file exists
@@ -476,7 +451,7 @@ async def generate_audio_files(
             yield f"Error: {character_map_file_path} not found. Please run identify_characters_and_output_book_to_jsonl.py first."
             return
 
-        with open(speaker_file_path, "r", encoding="utf-8") as file:
+        with open(multi_voice_book, "r", encoding="utf-8") as file:
             for line in file:
                 # Parse each line as a JSON object
                 json_object = json.loads(line.strip())
@@ -494,7 +469,6 @@ async def generate_audio_files(
         )  # total_lines is based on json_data_array for multi-voice
         lines_to_process = json_data_array
         print(f"Lines to process: {lines_to_process}")
-        print(f"JSON data array: {json_data_array}")
 
         if narrator_gender == "male":
             if MODEL == "kokoro":
@@ -518,6 +492,7 @@ async def generate_audio_files(
         narrator_voice = find_voice_for_gender_score(
             "narrator", character_gender_map, voice_map
         )
+
         yield "Loaded voice mappings and selected narrator voice"
 
     else:
@@ -532,7 +507,7 @@ async def generate_audio_files(
         if narrator_gender == "male":
             if MODEL == "kokoro":
                 narrator_voice = "am_puck"
-                dialogue_voice = "af_alloy"
+                dialogue_voice = "af_alloy+am_puck"
             else:
                 narrator_voice = "leo"
                 dialogue_voice = "dan"
@@ -610,33 +585,14 @@ async def generate_audio_files(
             )
 
             if type.lower() == "multi_voice":
-                # 'line' is expected to be a dictionary: {"line": "text", "speaker": "X"}
                 if isinstance(line, dict):
                     actual_text_content = line.get("line", "").strip()
                     speaker_name = line.get("speaker", "").strip()
 
-                    if not speaker_name:  # Speaker name is crucial for multi-voice
-                        print(
-                            f"Warning: Missing speaker name in multi-voice data at index {line_index}: {line}"
-                        )
+                    multi_voice =  find_voice_for_gender_score(
+                        speaker_name, character_gender_map, voice_map
+                    )
 
-                    # Only find voice if speaker_name is present
-                    if speaker_name:
-                        voice_for_this_line_multi_voice = find_voice_for_gender_score(
-                            speaker_name, character_gender_map, voice_map
-                        )
-                        print(
-                            f"Speaker: {speaker_name}, Voice: {voice_for_this_line_multi_voice}"
-                        )
-                    else:  # Fallback if speaker_name is missing, could use narrator or a default
-                        print(
-                            f"Warning: Using narrator voice for line index {line_index} due to missing speaker."
-                        )
-                        voice_for_this_line_multi_voice = (
-                            narrator_voice  # Or handle as an error
-                        )
-
-                    print(f"Line: {actual_text_content}")
                 else:
                     print(
                         f"ERROR: Expected a dictionary for multi-voice line at index {line_index}, but got {type(line)}. Content: {line}"
@@ -668,7 +624,6 @@ async def generate_audio_files(
                 for i, part in enumerate(annotated_parts):
                     text_to_speak = part["text"].strip()
 
-                    text_to_speak = validate_and_clean_text_for_tts(text_to_speak)
                     if text_to_speak is None:
                         print(
                             f"Skipping invalid text part {i} in line {line_index} ('{actual_text_content[:50]}...')"
@@ -686,15 +641,14 @@ async def generate_audio_files(
 
                     voice_to_use_for_this_part = ""
                     if type.lower() == "multi_voice":
-                        # For multi-voice, the entire line (all its parts) uses the determined speaker's voice.
-                        voice_to_use_for_this_part = voice_for_this_line_multi_voice
-                        if (
-                            not voice_to_use_for_this_part
-                        ):  # Fallback if voice couldn't be determined
-                            print(
-                                f"Warning: No specific voice for multi-voice part, falling back to narrator for line {line_index}"
-                            )
-                            voice_to_use_for_this_part = narrator_voice
+                      
+
+                        voice_to_use_for_this_part = (
+                            narrator_voice
+                            if part["type"] == "narration"
+                            else multi_voice
+                        )
+
                     else:  # single_voice
                         # For single-voice, distinguish between narration and dialogue voices.
                         voice_to_use_for_this_part = (
@@ -868,12 +822,10 @@ async def generate_audio_files(
 
     chapter_organization_bar.close()
     yield "Organizing audio by chapters complete"
-    
 
     chapter_files = concatenate_chapters(
         chapter_files, book_title, chapter_line_map, temp_line_audio_dir
     )
-    
 
     # Optimized parallel post-processing
     yield "Starting parallel post-processing..."
@@ -881,7 +833,6 @@ async def generate_audio_files(
         chapter_files, book_title, output_format
     )
     yield f"Completed parallel post-processing of {len(chapter_files)} chapters"
- 
 
     # Clean up temp line audio files -- commented out to allow for generation of different formats of the audiobook without re-generating the audio files
     # shutil.rmtree(temp_line_audio_dir)
