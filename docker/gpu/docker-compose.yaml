@@ -24,12 +24,12 @@ services:
               capabilities: [gpu]
 
   kokoro_fastapi:
-    image: ghcr.io/remsky/kokoro-fastapi-gpu:v0.2.2
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:v0.2.1
     container_name: kokoro_service
     restart: always
     network_mode: host
     command: >
-      uvicorn api.src.main:app --host 0.0.0.0 --port 8880 --log-level debug --workers KOKORO_MAX_PARALLEL_REQUESTS_BATCH_SIZE
+      uvicorn api.src.main:app --host 0.0.0.0 --port 8880 --log-level debug --workers TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE
     deploy:
       resources:
         reservations:

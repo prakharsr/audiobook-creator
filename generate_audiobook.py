@@ -23,25 +23,29 @@ import json
 import os
 import asyncio
 import re
+import tempfile
 from word2number import w2n
 import time
 import sys
+from pydub import AudioSegment
 from utils.run_shell_commands import check_if_ffmpeg_is_installed, check_if_calibre_is_installed
 from utils.file_utils import read_json, empty_directory
-from utils.audiobook_utils import merge_chapters_to_m4b, convert_audio_file_formats, add_silence_to_audio_file_by_reencoding_using_ffmpeg, merge_chapters_to_standard_audio_file, add_silence_to_audio_file_by_appending_pre_generated_silence
-from utils.check_if_kokoro_api_is_up import check_if_kokoro_api_is_up
+from utils.audiobook_utils import merge_chapters_to_m4b, convert_audio_file_formats, add_silence_to_audio_file_by_reencoding_using_ffmpeg, merge_chapters_to_standard_audio_file, add_silence_to_audio_file_by_appending_pre_generated_silence, assemble_chapter_with_ffmpeg, add_silence_to_chapter_with_ffmpeg
+from utils.check_if_audio_generator_api_is_up import check_if_audio_generator_api_is_up
+from utils.voice_mapping import get_narrator_and_dialogue_voices, get_voice_for_character_score, get_narrator_voice_for_character
 from dotenv import load_dotenv
 
 load_dotenv()
 
-KOKORO_BASE_URL = os.environ.get("KOKORO_BASE_URL", "http://localhost:8880/v1")
-KOKORO_API_KEY = os.environ.get("KOKORO_API_KEY", "not-needed")
-KOKORO_MAX_PARALLEL_REQUESTS_BATCH_SIZE = int(os.environ.get("KOKORO_MAX_PARALLEL_REQUESTS_BATCH_SIZE", 2))
+TTS_BASE_URL = os.environ.get("TTS_BASE_URL", "http://localhost:8880/v1")
+TTS_API_KEY = os.environ.get("TTS_API_KEY", "not-needed")
+TTS_MODEL = os.environ.get("TTS_MODEL", "kokoro")
+TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE = int(os.environ.get("TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE", 2))
 
 os.makedirs("audio_samples", exist_ok=True)
 
 async_openai_client = AsyncOpenAI(
-    base_url=KOKORO_BASE_URL, api_key=KOKORO_API_KEY
+    base_url=TTS_BASE_URL, api_key=TTS_API_KEY
 )
 
 def sanitize_filename(text):
@@ -94,32 +98,37 @@ def check_if_chapter_heading(text):
             return False  # Invalid number format
     return False  # No match
     
-def find_voice_for_gender_score(character: str, character_gender_map, kokoro_voice_map):
+def find_voice_for_gender_score(character: str, character_gender_map, engine_name: str, narrator_gender: str):
     """
-    Finds the appropriate voice for a character based on their gender score.
+    Finds the appropriate voice for a character based on their gender score using the new voice mapping system.
 
     This function takes in the name of a character, a dictionary mapping character names to their gender scores,
-    and a dictionary mapping voice identifiers to gender scores. It returns the voice identifier that matches the
-    character's gender score.
+    the TTS engine name, and the narrator gender preference. It returns the voice identifier that matches 
+    the character's gender score within the appropriate score map (male_score_map or female_score_map).
 
     Args:
         character (str): The name of the character for whom the voice is being determined.
         character_gender_map (dict): A dictionary mapping character names to their gender scores.
-        kokoro_voice_map (dict): A dictionary mapping voice identifiers to gender scores.
+        engine_name (str): The TTS engine name ("kokoro" or "orpheus").
+        narrator_gender (str): User's narrator gender preference ("male" or "female").
 
     Returns:
         str: The voice identifier that matches the character's gender score.
     """
 
-    # Get the character's gender score
-    character_gender_score_doc = character_gender_map["scores"][character.lower()]
-    character_gender_score = character_gender_score_doc["gender_score"]
+    # Handle narrator character specially
+    if character.lower() == "narrator":
+        return get_narrator_voice_for_character(engine_name, narrator_gender)
 
-    # Iterate over the voice identifiers and their scores
-    for voice, score in kokoro_voice_map.items():
-        # Find the voice identifier that matches the character's gender score
-        if score == character_gender_score:
-            return voice
+    # Get the character's gender score
+    if "scores" in character_gender_map and character.lower() in character_gender_map["scores"]:
+        character_info = character_gender_map["scores"][character.lower()]
+        character_gender_score = character_info["gender_score"]
+        
+        return get_voice_for_character_score(engine_name, narrator_gender, character_gender_score)
+    else:
+        # Fallback for unknown characters - use score 5 (neutral)
+        return get_voice_for_character_score(engine_name, narrator_gender, 5)
 
 async def generate_audio_with_single_voice(output_format, narrator_gender, generate_m4b_audiobook_file=False, book_path=""):
     # Read the text from the file
@@ -149,16 +158,11 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
     # Filter out empty lines
     lines = [line.strip() for line in lines if line.strip()]
     
-    # Set the voices to be used
-    narrator_voice = "" # voice to be used for narration
-    dialogue_voice = "" # voice to be used for dialogue
-
-    if narrator_gender == "male":
-        narrator_voice = "am_puck"
-        dialogue_voice = "af_alloy+am_puck"
-    else:
-        narrator_voice = "af_heart"
-        dialogue_voice = "af_sky"
+    # Set the voices to be used - now using the new voice mapping system
+    narrator_voice, dialogue_voice = get_narrator_and_dialogue_voices(
+        engine_name=TTS_MODEL, 
+        narrator_gender=narrator_gender
+    )
 
     # Setup directories
     temp_audio_dir = "temp_audio"
@@ -170,11 +174,11 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
     os.makedirs(temp_line_audio_dir, exist_ok=True)
     
     # Batch processing parameters
-    semaphore = asyncio.Semaphore(KOKORO_MAX_PARALLEL_REQUESTS_BATCH_SIZE)
+    semaphore = asyncio.Semaphore(TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE)
     
     # Initial setup for chapters
     chapter_index = 1
-    current_chapter_audio = f"Introduction.aac"
+    current_chapter_audio = f"Introduction.wav"
     chapter_files = []
     
     # First pass: Generate audio for each line independently
@@ -198,28 +202,48 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
             # Split the line into annotated parts
             annotated_parts = split_and_annotate_text(line)
             
-            # Create an in-memory buffer for the audio data
-            audio_buffer = bytearray()
+            # Create combined audio using PyDub for seamless concatenation
+            combined_audio = AudioSegment.empty()
             
             for part in annotated_parts:
                 text_to_speak = part["text"]
                 voice_to_speak_in = narrator_voice if part["type"] == "narration" else dialogue_voice
                 
-                # Generate audio for the part
-                async with async_openai_client.audio.speech.with_streaming_response.create(
-                    model="kokoro",
-                    voice=voice_to_speak_in,
-                    response_format="aac",
-                    speed=0.85,
-                    input=text_to_speak
-                ) as response:
-                    async for chunk in response.iter_bytes():
-                        audio_buffer.extend(chunk)
+                # Create temporary file for this part
+                temp_file = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+                temp_path = temp_file.name
+                temp_file.close()
+                
+                try:
+                    # Create an in-memory buffer for the audio data
+                    audio_buffer = bytearray()
+                    
+                    # Generate audio for the part
+                    async with async_openai_client.audio.speech.with_streaming_response.create(
+                        model=TTS_MODEL,
+                        voice=voice_to_speak_in,
+                        response_format="wav",
+                        speed=0.85,
+                        input=text_to_speak
+                    ) as response:
+                        async for chunk in response.iter_bytes():
+                            audio_buffer.extend(chunk)
+                    
+                    # Write part audio to temp file
+                    with open(temp_path, "wb") as temp_wav:
+                        temp_wav.write(audio_buffer)
+                    
+                    # Load as AudioSegment and add to combined audio
+                    part_segment = AudioSegment.from_wav(temp_path)
+                    combined_audio += part_segment
+                finally:
+                    # Clean up temp file
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
             
             # Write this line's audio to a temporary file
-            line_audio_path = os.path.join(temp_line_audio_dir, f"line_{line_index:06d}.aac")
-            with open(line_audio_path, "wb") as line_file:
-                line_file.write(audio_buffer)
+            line_audio_path = os.path.join(temp_line_audio_dir, f"line_{line_index:06d}.wav")
+            combined_audio.export(line_audio_path, format="wav")
             
             # Update progress bar
             progress_bar.update(1)
@@ -277,7 +301,7 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
         # Check if this is a chapter heading
         if result["is_chapter_heading"]:
             chapter_index += 1
-            current_chapter_audio = f"{sanitize_filename(result['line'])}.aac"
+            current_chapter_audio = f"{sanitize_filename(result['line'])}.wav"
             
         if current_chapter_audio not in chapter_files:
             chapter_files.append(current_chapter_audio)
@@ -294,50 +318,41 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
     chapter_assembly_bar = tqdm(total=len(chapter_files), unit="chapter", desc="Assembling Chapters")
     
     for chapter_file in chapter_files:
-        chapter_path = os.path.join(temp_audio_dir, chapter_file)
-        
-        with open(chapter_path, "wb") as chapter_output:
-            # Create progress bar for lines in this chapter
-            line_assembly_bar = tqdm(
-                total=len(chapter_line_map[chapter_file]), 
-                unit="line", 
-                desc=f"Assembling {chapter_file[:20]}..."
-            )
-            
-            # Process each line in the correct order
-            for line_index in sorted(chapter_line_map[chapter_file]):
-                line_audio_path = os.path.join(temp_line_audio_dir, f"line_{line_index:06d}.aac")
-                
-                # Read the line audio and append it to the chapter file
-                with open(line_audio_path, "rb") as line_input:
-                    chapter_output.write(line_input.read())
-                
-                line_assembly_bar.update(1)
-            
-            line_assembly_bar.close()
+        # Use FFmpeg-based assembly instead of PyDub for memory efficiency
+        assemble_chapter_with_ffmpeg(
+            chapter_file, 
+            chapter_line_map[chapter_file], 
+            temp_line_audio_dir, 
+            temp_audio_dir
+        )
         
         chapter_assembly_bar.update(1)
         yield f"Assembled chapter: {chapter_file}"
     
     chapter_assembly_bar.close()
+    yield "Completed assembling all chapters"
     
     # Post-processing steps
     post_processing_bar = tqdm(total=len(chapter_files)*2, unit="task", desc="Post Processing")
     
-    # Add silence to each chapter file
-    for chapter in chapter_files:
-        add_silence_to_audio_file_by_appending_pre_generated_silence(temp_audio_dir, chapter)
+    # Add silence to each chapter file using FFmpeg
+    for chapter_file in chapter_files:
+        chapter_path = os.path.join(temp_audio_dir, chapter_file)
+        
+        # Use FFmpeg-based silence addition instead of PyDub for memory efficiency
+        add_silence_to_chapter_with_ffmpeg(chapter_path, 1000)  # 1 second silence
+        
         post_processing_bar.update(1)
-        yield f"Added silence to chapter: {chapter}"
+        yield f"Added silence to chapter: {chapter_file}"
 
     m4a_chapter_files = []
 
     # Convert all chapter files to M4A format
-    for chapter in chapter_files:
-        chapter_name = chapter.split('.')[0]
+    for chapter_file in chapter_files:
+        chapter_name = chapter_file.split('.')[0]
         m4a_chapter_files.append(f"{chapter_name}.m4a")
-        # Convert to M4A as raw AAC have problems with timestamps and metadata
-        convert_audio_file_formats("aac", "m4a", temp_audio_dir, chapter_name)
+        # Convert WAV to M4A for better compatibility with timestamps and metadata
+        convert_audio_file_formats("wav", "m4a", temp_audio_dir, chapter_name)
         post_processing_bar.update(1)
         yield f"Converted chapter to M4A: {chapter_name}"
     
@@ -394,16 +409,11 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
 
     yield "Loaded speaker-attributed lines from JSONL file"
 
-    # Load mappings for character gender and voice selection
+    # Load mappings for character gender
     character_gender_map = read_json("character_gender_map.json")
-    kokoro_voice_map = None
 
-    if narrator_gender == "male":
-        kokoro_voice_map = read_json("static_files/kokoro_voice_map_male_narrator.json")
-    else:
-        kokoro_voice_map = read_json("static_files/kokoro_voice_map_female_narrator.json")
-
-    narrator_voice = find_voice_for_gender_score("narrator", character_gender_map, kokoro_voice_map)
+    # Get narrator voice using the new voice mapping system
+    narrator_voice = find_voice_for_gender_score("narrator", character_gender_map, TTS_MODEL, narrator_gender)
     yield "Loaded voice mappings and selected narrator voice"
     
     # Setup directories
@@ -417,11 +427,11 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
     yield "Set up temporary directories for audio processing"
     
     # Batch processing parameters
-    semaphore = asyncio.Semaphore(KOKORO_MAX_PARALLEL_REQUESTS_BATCH_SIZE)
+    semaphore = asyncio.Semaphore(TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE)
     
     # Initial setup for chapters
     chapter_index = 1
-    current_chapter_audio = f"Introduction.aac"
+    current_chapter_audio = f"Introduction.wav"
     chapter_files = []
     
     # First pass: Generate audio for each line independently
@@ -446,33 +456,53 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
                 return None
                 
             speaker = doc["speaker"]
-            speaker_voice = find_voice_for_gender_score(speaker, character_gender_map, kokoro_voice_map)
+            speaker_voice = find_voice_for_gender_score(speaker, character_gender_map, TTS_MODEL, narrator_gender)
             
             # Split the line into annotated parts
             annotated_parts = split_and_annotate_text(line)
             
-            # Create an in-memory buffer for the audio data
-            audio_buffer = bytearray()
+            # Create combined audio using PyDub for seamless concatenation
+            combined_audio = AudioSegment.empty()
             
             for part in annotated_parts:
                 text_to_speak = part["text"]
                 voice_to_speak_in = narrator_voice if part["type"] == "narration" else speaker_voice
                 
-                # Generate audio for the part
-                async with async_openai_client.audio.speech.with_streaming_response.create(
-                    model="kokoro",
-                    voice=voice_to_speak_in,
-                    response_format="aac",
-                    speed=0.85,
-                    input=text_to_speak
-                ) as response:
-                    async for chunk in response.iter_bytes():
-                        audio_buffer.extend(chunk)
+                # Create temporary file for this part
+                temp_file = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+                temp_path = temp_file.name
+                temp_file.close()
+                
+                try:
+                    # Create an in-memory buffer for the audio data
+                    audio_buffer = bytearray()
+                    
+                    # Generate audio for the part
+                    async with async_openai_client.audio.speech.with_streaming_response.create(
+                        model=TTS_MODEL,
+                        voice=voice_to_speak_in,
+                        response_format="wav",
+                        speed=0.85,
+                        input=text_to_speak
+                    ) as response:
+                        async for chunk in response.iter_bytes():
+                            audio_buffer.extend(chunk)
+                    
+                    # Write part audio to temp file
+                    with open(temp_path, "wb") as temp_wav:
+                        temp_wav.write(audio_buffer)
+                    
+                    # Load as AudioSegment and add to combined audio
+                    part_segment = AudioSegment.from_wav(temp_path)
+                    combined_audio += part_segment
+                finally:
+                    # Clean up temp file
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
             
             # Write this line's audio to a temporary file
-            line_audio_path = os.path.join(temp_line_audio_dir, f"line_{line_index:06d}.aac")
-            with open(line_audio_path, "wb") as line_file:
-                line_file.write(audio_buffer)
+            line_audio_path = os.path.join(temp_line_audio_dir, f"line_{line_index:06d}.wav")
+            combined_audio.export(line_audio_path, format="wav")
             
             # Update progress bar
             progress_bar.update(1)
@@ -531,7 +561,7 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
         # Check if this is a chapter heading
         if result["is_chapter_heading"]:
             chapter_index += 1
-            current_chapter_audio = f"{sanitize_filename(result['line'])}.aac"
+            current_chapter_audio = f"{sanitize_filename(result['line'])}.wav"
             
         if current_chapter_audio not in chapter_files:
             chapter_files.append(current_chapter_audio)
@@ -547,32 +577,17 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
     # Third pass: Concatenate audio files for each chapter in order
     chapter_assembly_bar = tqdm(total=len(chapter_files), unit="chapter", desc="Assembling Chapters")
     
-    for chapter_idx, chapter_file in enumerate(chapter_files):
-        chapter_path = os.path.join(temp_audio_dir, chapter_file)
-        chapter_name_display = chapter_file[:30] + "..." if len(chapter_file) > 30 else chapter_file
-        
-        with open(chapter_path, "wb") as chapter_output:
-            # Create progress bar for lines in this chapter
-            line_assembly_bar = tqdm(
-                total=len(chapter_line_map[chapter_file]), 
-                unit="line", 
-                desc=f"Chapter {chapter_idx+1}/{len(chapter_files)}: {chapter_name_display}"
-            )
-            
-            # Process each line in the correct order
-            for line_index in sorted(chapter_line_map[chapter_file]):
-                line_audio_path = os.path.join(temp_line_audio_dir, f"line_{line_index:06d}.aac")
-                
-                # Read the line audio and append it to the chapter file
-                with open(line_audio_path, "rb") as line_input:
-                    chapter_output.write(line_input.read())
-                
-                line_assembly_bar.update(1)
-            
-            line_assembly_bar.close()
+    for chapter_file in chapter_files:
+        # Use FFmpeg-based assembly instead of PyDub for memory efficiency
+        assemble_chapter_with_ffmpeg(
+            chapter_file, 
+            chapter_line_map[chapter_file], 
+            temp_line_audio_dir, 
+            temp_audio_dir
+        )
         
         chapter_assembly_bar.update(1)
-        yield f"Assembled chapter {chapter_idx+1}/{len(chapter_files)}: {chapter_name_display}"
+        yield f"Assembled chapter: {chapter_file}"
     
     chapter_assembly_bar.close()
     yield "Completed assembling all chapters"
@@ -580,22 +595,26 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
     # Post-processing steps
     post_processing_bar = tqdm(total=len(chapter_files)*2, unit="task", desc="Post Processing")
     
-    # Add silence to each chapter file
-    for chapter_idx, chapter in enumerate(chapter_files):
-        add_silence_to_audio_file_by_appending_pre_generated_silence(temp_audio_dir, chapter)
+    # Add silence to each chapter file using FFmpeg
+    for chapter_file in chapter_files:
+        chapter_path = os.path.join(temp_audio_dir, chapter_file)
+        
+        # Use FFmpeg-based silence addition instead of PyDub for memory efficiency
+        add_silence_to_chapter_with_ffmpeg(chapter_path, 1000)  # 1 second silence
+        
         post_processing_bar.update(1)
-        yield f"Added silence to chapter {chapter_idx+1}/{len(chapter_files)}"
+        yield f"Added silence to chapter: {chapter_file}"
 
     m4a_chapter_files = []
 
     # Convert all chapter files to M4A format
-    for chapter_idx, chapter in enumerate(chapter_files):
-        chapter_name = chapter.split('.')[0]
+    for chapter_file in chapter_files:
+        chapter_name = chapter_file.split('.')[0]
         m4a_chapter_files.append(f"{chapter_name}.m4a")
-        # Convert to M4A as raw AAC have problems with timestamps and metadata
-        convert_audio_file_formats("aac", "m4a", temp_audio_dir, chapter_name)
+        # Convert WAV to M4A for better compatibility with timestamps and metadata
+        convert_audio_file_formats("wav", "m4a", temp_audio_dir, chapter_name)
         post_processing_bar.update(1)
-        yield f"Converted chapter {chapter_idx+1}/{len(chapter_files)} to M4A"
+        yield f"Converted chapter to M4A: {chapter_name}"
     
     post_processing_bar.close()
     
@@ -617,9 +636,9 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
         yield f"Audiobook in {output_format} format created successfully"
 
 async def process_audiobook_generation(voice_option, narrator_gender, output_format, book_path):
-    is_kokoro_api_up, message = await check_if_kokoro_api_is_up(async_openai_client)
+    is_audio_generator_api_up, message = await check_if_audio_generator_api_is_up(async_openai_client)
 
-    if not is_kokoro_api_up:
+    if not is_audio_generator_api_up:
         raise Exception(message)
 
     generate_m4b_audiobook_file = False

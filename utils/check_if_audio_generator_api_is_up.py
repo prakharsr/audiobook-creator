@@ -16,18 +16,24 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import os
 import traceback
+from dotenv import load_dotenv
 
-async def check_if_kokoro_api_is_up(client):
+load_dotenv()
+
+TTS_MODEL = os.environ.get("TTS_MODEL", "kokoro")
+
+async def check_if_audio_generator_api_is_up(client):
     try:
         async with client.audio.speech.with_streaming_response.create(
-            model="kokoro",
+            model=TTS_MODEL,
             voice="af_heart",
-            response_format="aac",  # Ensuring format consistency
+            response_format="wav",  # Changed to WAV for consistency
             speed=0.85,
             input="Hello, how are you ?"
         ) as response:
             return True, None
     except Exception as e:
         traceback.print_exc()
-        return False, "The Kokoro API is not working. Please check if the .env file is correctly set up and the Kokoro API is up. Error: " + str(e)
+        return False, f"The {TTS_MODEL.upper()} API is not working. Please check if the .env file is correctly set up and the {TTS_MODEL.upper()} API is up. Error: " + str(e)

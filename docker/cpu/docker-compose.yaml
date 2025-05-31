@@ -17,7 +17,7 @@ services:
     network_mode: host
 
   kokoro_fastapi:
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.2  # Use CPU version
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.1  # Use CPU version
     container_name: kokoro_service
     restart: always
     network_mode: host

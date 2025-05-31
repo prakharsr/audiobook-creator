@@ -1,0 +1,66 @@
+{
+    "kokoro": {
+        "male_narrator": "am_puck",
+        "male_dialogue": "af_alloy+am_puck",
+        "female_narrator": "af_heart",
+        "female_dialogue": "af_sky",
+        "male_score_map": {
+            "0": "am_puck",
+            "1": "am_onyx",
+            "2": "am_michael",
+            "3": "am_echo",
+            "4": "am_fenrir+bf_alice",
+            "5": "af_alloy+am_puck",
+            "6": "af_kore",
+            "7": "af_sky",
+            "8": "af_aoede+af_heart",
+            "9": "af_sarah",
+            "10": "af_bella"
+        },
+        "female_score_map": {
+            "0": "af_heart",
+            "1": "am_onyx",
+            "2": "am_echo",
+            "3": "am_puck",
+            "4": "am_fenrir+bf_alice",
+            "5": "af_alloy+am_puck",
+            "6": "af_kore",
+            "7": "af_sky",
+            "8": "af_aoede+af_heart",
+            "9": "af_sarah",
+            "10": "af_bella"
+        }
+    },
+    "orpheus": {
+        "male_narrator": "zac",
+        "male_dialogue": "dan",
+        "female_narrator": "tara",
+        "female_dialogue": "mia",
+        "male_score_map": {
+            "0": "zac",
+            "1": "leo",
+            "2": "dan",
+            "3": "dan",
+            "4": "zac",
+            "5": "jess",
+            "6": "zoe",
+            "7": "mia",
+            "8": "tara",
+            "9": "tara",
+            "10": "leah"
+        },
+        "female_score_map": {
+            "0": "tara",
+            "1": "leo",
+            "2": "dan",
+            "3": "zac",
+            "4": "zac",
+            "5": "jess",
+            "6": "jess",
+            "7": "zoe",
+            "8": "mia",
+            "9": "mia",
+            "10": "leah"
+        }
+    }
+}

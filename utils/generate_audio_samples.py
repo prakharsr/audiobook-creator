@@ -25,23 +25,34 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-KOKORO_BASE_URL = os.environ.get("KOKORO_BASE_URL", "http://localhost:8880/v1")
-KOKORO_API_KEY = os.environ.get("KOKORO_API_KEY", "not-needed")
+TTS_BASE_URL = os.environ.get("TTS_BASE_URL", "http://localhost:8880/v1")
+TTS_API_KEY = os.environ.get("TTS_API_KEY", "not-needed")
+TTS_MODEL = os.environ.get("TTS_MODEL", "kokoro")
 
 os.makedirs("audio_samples", exist_ok=True)
 
 client = OpenAI(
-    base_url=KOKORO_BASE_URL, api_key=KOKORO_API_KEY
+    base_url=TTS_BASE_URL, api_key=TTS_API_KEY
 )
+
+def get_available_voices():
+    """Fetch available voices from the TTS API endpoint."""
+    try:
+        response = requests.get(f"{TTS_BASE_URL}/audio/voices")
+        voices_res = response.json()
+        voices = voices_res["voices"]
+        # print("Available voices:", voices)
+        return voices
+    except Exception as e:
+        print(f"Error fetching voices: {e}")
+        return []
 
 text = """Humpty Dumpty sat on a wall.
 Humpty Dumpty had a great fall.
-All the king's horses and all the king's men
+All the king's horses and all the king's men.
 Couldn't put Humpty together again."""
 
-response = requests.get(f"{KOKORO_BASE_URL}/audio/voices")
-voices_res = response.json()
-voices = voices_res["voices"]
+voices = get_available_voices()
 # print("Available voices:", voices)
 
 combinations = list(itertools.combinations(voices, 2))
@@ -57,26 +68,26 @@ if(gen_for_all_combinations == "yes"):
     with tqdm(total=len(all_voices_combinations), unit="line", desc="Audio Generation Progress") as overall_pbar:
         for voice in all_voices_combinations:
             with client.audio.speech.with_streaming_response.create(
-                model="kokoro",
+                model=TTS_MODEL,
                 voice=voice,
-                response_format="aac",  # Ensuring format consistency
+                response_format="wav",  # Changed to WAV for consistency
                 speed=0.85,
                 input=text
             ) as response:
-                file_path = f"audio_samples/{voice}.aac"
+                file_path = f"audio_samples/{voice}.wav"
                 response.stream_to_file(file_path)
             overall_pbar.update(1)
 else:
     with tqdm(total=len(voices), unit="line", desc="Audio Generation Progress") as overall_pbar:
         for voice in voices:
             with client.audio.speech.with_streaming_response.create(
-                model="kokoro",
+                model=TTS_MODEL,
                 voice=voice,
-                response_format="aac",  # Ensuring format consistency
+                response_format="wav",  # Changed to WAV for consistency
                 speed=0.85,
                 input=text
             ) as response:
-                file_path = f"audio_samples/{voice}.aac"
+                file_path = f"audio_samples/{voice}_test.wav"
                 response.stream_to_file(file_path)
             overall_pbar.update(1)
 
