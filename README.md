@@ -102,6 +102,31 @@ Watch the demo video:
    ```
    ### Option 2: Orpheus TTS 
    Set up Orpheus TTS following the [Orpheus-TTS FastAPI](https://github.com/Lex-au/Orpheus-FastAPI). Make sure it's running on an OpenAI-compatible endpoint (default: http://localhost:5005/v1). You can either use their docker container to run the model or run the orpheus model using LMStudio and then run the fastapi server. Refer to [this guide](https://github.com/prakharsr/audiobook-creator/?tab=readme-ov-file#parallel-batch-inferencing-of-audio-for-faster-audio-generation) for speeding up audiobook generation.
+
+   #### Orpheus FastAPI Configuration (Recommended)
+   
+   To prevent text repetition issues and ensure optimal performance, configure the Orpheus FastAPI with these environment variables in the `.env` file when running the server:
+
+   > **Note**: The `ORPHEUS_TEMPERATURE=0` and `ORPHEUS_TOP_P=1` settings are crucial for preventing text repetition that can occur with Orpheus TTS.
+
+   ```bash
+   # API Configuration
+   ORPHEUS_API_URL=http://127.0.0.1:1234/v1/completions # LM Studio endpoint for model inference
+   ORPHEUS_API_TIMEOUT=3600 # API timeout in seconds (1 hour for long generations)
+   ORPHEUS_HOST=0.0.0.0 # Host interface for the FastAPI server
+   ORPHEUS_PORT=5005 # Port for the FastAPI server
+   
+   # Model Configuration  
+   ORPHEUS_MODEL_NAME=Orpheus-3b-FT-Q4_K_M.gguf # Specific Orpheus model file to use
+   ORPHEUS_MAX_TOKENS=8192 # Maximum tokens to generate (prevents runaway generation)
+   
+   # Generation Parameters (Critical for preventing repetition)
+   ORPHEUS_TEMPERATURE=0 # Deterministic generation (0 = no randomness, prevents loops)
+   ORPHEUS_TOP_P=1 # Nucleus sampling threshold (1 = consider all tokens)
+   
+   # Audio Quality
+   ORPHEUS_SAMPLE_RATE=24000 # High-quality audio output sampling rate
+   ```
 - Create a .env file from .env_sample and configure it with the correct values. Make sure you follow the instructions mentioned at the top of .env_sample to avoid errors.
    ```bash
    cp .env_sample .env

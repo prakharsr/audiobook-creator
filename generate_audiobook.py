@@ -33,6 +33,7 @@ from utils.file_utils import read_json, empty_directory
 from utils.audiobook_utils import merge_chapters_to_m4b, convert_audio_file_formats, add_silence_to_audio_file_by_reencoding_using_ffmpeg, merge_chapters_to_standard_audio_file, add_silence_to_audio_file_by_appending_pre_generated_silence, assemble_chapter_with_ffmpeg, add_silence_to_chapter_with_ffmpeg
 from utils.check_if_audio_generator_api_is_up import check_if_audio_generator_api_is_up
 from utils.voice_mapping import get_narrator_and_dialogue_voices, get_voice_for_character_score, get_narrator_voice_for_character
+from utils.text_preprocessing import preprocess_text_for_tts
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -153,6 +154,13 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
 
     with open("converted_book.txt", "r", encoding='utf-8') as f:
         text = f.read()
+    
+    # Apply text preprocessing for Orpheus TTS to prevent repetition issues
+    if TTS_MODEL.lower() == "orpheus":
+        text = preprocess_text_for_tts(text)
+        
+        yield "Applied text preprocessing for Orpheus TTS and saved to converted_book_preprocessed.txt"
+    
     lines = text.split("\n")
     
     # Filter out empty lines
@@ -408,6 +416,14 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
             json_data_array.append(json_object)
 
     yield "Loaded speaker-attributed lines from JSONL file"
+
+    # Apply text preprocessing for Orpheus TTS to prevent repetition issues
+    if TTS_MODEL.lower() == "orpheus":
+        for item in json_data_array:
+            if "line" in item and item["line"]:
+                item["line"] = preprocess_text_for_tts(item["line"])
+        
+        yield "Applied text preprocessing for Orpheus TTS and saved to speaker_attributed_book_preprocessed.jsonl"
 
     # Load mappings for character gender
     character_gender_map = read_json("character_gender_map.json")
