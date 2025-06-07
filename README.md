@@ -267,7 +267,7 @@ Watch the demo video:
 Planned future enhancements:
 
 -  ⏳ Add support for choosing between various languages which are currently supported by Kokoro and Orpheus.
--  ⏳ Process text and add emotion tags to the text in Orpheus TTS to enhance character voice expression
+-  ✅ Process text and add emotion tags to the text in Orpheus TTS to enhance character voice expression
 -  ✅ Add support for [Orpheus](https://github.com/canopyai/Orpheus-TTS). Orpheus supports 
 emotion tags for a more immersive listening experience.
 -  ✅ Support batch inference for TTS engines to speed up audiobook generation

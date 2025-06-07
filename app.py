@@ -23,6 +23,9 @@ from fastapi import FastAPI
 from book_to_txt import process_book_and_extract_text, save_book
 from identify_characters_and_output_book_to_jsonl import process_book_and_identify_characters
 from generate_audiobook import process_audiobook_generation
+from dotenv import load_dotenv
+
+load_dotenv()
 
 css = """
 .step-heading {font-size: 1.2rem; font-weight: bold; margin-bottom: 0.5rem}
@@ -103,7 +106,7 @@ async def identify_characters_wrapper(book_title):
         yield None
         return
 
-async def generate_audiobook_wrapper(voice_type, narrator_gender, output_format, book_file, book_title):
+async def generate_audiobook_wrapper(voice_type, narrator_gender, output_format, book_file, book_title, add_emotion_tags):
     """Wrapper for audiobook generation with validation and progress updates"""
     if book_file is None:
         yield gr.Warning("Please upload a book file first."), None
@@ -117,11 +120,21 @@ async def generate_audiobook_wrapper(voice_type, narrator_gender, output_format,
         yield gr.Warning("Please select voice type and output format."), None
         yield None, None
         return
+    
+    # Get current TTS engine from environment
+    current_tts_engine = os.environ.get("TTS_MODEL", "kokoro").lower()
+    
+    # Validate emotion tags selection
+    if add_emotion_tags and current_tts_engine != "orpheus":
+        yield gr.Warning("Emotion tags are only supported with Orpheus TTS engine."), None
+        yield None, None
+        return
+        
     try:
         last_output = None
         audiobook_path = None
         # Pass through all yield values from the original function
-        async for output in process_audiobook_generation(voice_type, narrator_gender, output_format, book_file):
+        async for output in process_audiobook_generation(voice_type, narrator_gender, output_format, book_file, add_emotion_tags):
             last_output = output
             yield output, None  # Yield each progress update without file path
         
@@ -146,6 +159,10 @@ async def generate_audiobook_wrapper(voice_type, narrator_gender, output_format,
 with gr.Blocks(css=css, theme=gr.themes.Default()) as gradio_app:
     gr.Markdown("# 📖 Audiobook Creator")
     gr.Markdown("Create professional audiobooks from your ebooks in just a few steps.")
+    
+    # Get TTS configuration from environment variables
+    current_tts_engine = os.environ.get("TTS_MODEL", "kokoro").lower()
+    tts_base_url = os.environ.get("TTS_BASE_URL", "Not configured")
     
     with gr.Row():
         with gr.Column(scale=1):
@@ -194,7 +211,7 @@ with gr.Blocks(css=css, theme=gr.themes.Default()) as gradio_app:
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown('<div class="step-heading">🧩 Step 3: Character Identification (Optional)</div>')
+            gr.Markdown('<div class="step-heading">🧩 Step 3: Character Identification (Optional - Requires LLM)</div>')
             
             identify_btn = gr.Button("Identify Characters", variant="primary")
             
@@ -230,12 +247,44 @@ with gr.Blocks(css=css, theme=gr.themes.Default()) as gradio_app:
                     value="female"
                 )
                 
+                tts_engine_display = gr.Radio(
+                    ["kokoro", "orpheus"], 
+                    label="TTS Engine",
+                    value=current_tts_engine,
+                    interactive=False,
+                    info="Configure TTS engine in .env file. Orpheus supports emotion tags."
+                )
+                
                 output_format = gr.Dropdown(
                     ["M4B (Chapters & Cover)", "AAC", "M4A", "MP3", "WAV", "OPUS", "FLAC", "PCM"], 
                     label="Output Format",
                     value="M4B (Chapters & Cover)",
                     info="M4B supports chapters and cover art"
                 )
+            
+            # Emotion tags option (conditional visibility based on TTS engine in .env)
+            emotion_tags_visible = current_tts_engine == "orpheus"
+            with gr.Group(visible=emotion_tags_visible) as emotion_tags_group:
+                emotion_tags_enabled = gr.Checkbox(
+                    label="Automatically add emotion tags to the text to enhance narration ? (Optional - Requires LLM)",
+                    value=False
+                )
+                
+                with gr.Accordion("About Emotion Tags", open=True):
+                    gr.Markdown("""
+                    **Emotion Tags enhance your audiobook by adding natural expressions:**
+
+                    * **`<laugh>`** - For laughter or when text indicates laughing
+                    * **`<chuckle>`** - For light laughter or chuckling sounds
+                    * **`<sigh>`** - For sighing or expressions of resignation/relief
+                    * **`<cough>`** - For coughing sounds or throat clearing
+                    * **`<sniffle>`** - For sniffling or nasal sounds (emotion, cold, etc.)
+                    * **`<groan>`** - For groaning sounds expressing discomfort/frustration
+                    * **`<yawn>`** - For yawning or expressions of tiredness
+                    * **`<gasp>`** - For gasping sounds of surprise/shock
+                    
+                    These tags are automatically placed based on the text context and work only with **Orpheus TTS**.
+                    """)
             
             generate_btn = gr.Button("Generate Audiobook", variant="primary")
             
@@ -286,7 +335,7 @@ with gr.Blocks(css=css, theme=gr.themes.Default()) as gradio_app:
     # Update the generate_audiobook_wrapper to output both progress text and file path
     generate_btn.click(
         generate_audiobook_wrapper, 
-        inputs=[voice_type, narrator_gender, output_format, book_input, book_title], 
+        inputs=[voice_type, narrator_gender, output_format, book_input, book_title, emotion_tags_enabled], 
         outputs=[audio_output, audiobook_file],
         queue=True
     ).then(

@@ -34,6 +34,7 @@ from utils.audiobook_utils import merge_chapters_to_m4b, convert_audio_file_form
 from utils.check_if_audio_generator_api_is_up import check_if_audio_generator_api_is_up
 from utils.voice_mapping import get_narrator_and_dialogue_voices, get_voice_for_character_score, get_narrator_voice_for_character
 from utils.text_preprocessing import preprocess_text_for_tts
+from utils.add_emotion_tags_to_text import add_tags_to_text_chunks, process_emotion_tags_for_jsonl_data
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -131,7 +132,7 @@ def find_voice_for_gender_score(character: str, character_gender_map, engine_nam
         # Fallback for unknown characters - use score 5 (neutral)
         return get_voice_for_character_score(engine_name, narrator_gender, 5)
 
-async def generate_audio_with_single_voice(output_format, narrator_gender, generate_m4b_audiobook_file=False, book_path=""):
+async def generate_audio_with_single_voice(output_format, narrator_gender, generate_m4b_audiobook_file=False, book_path="", add_emotion_tags=False):
     # Read the text from the file
     """
     Generate an audiobook using a single voice for narration and dialogues.
@@ -146,6 +147,7 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
         narrator_gender (str): The gender of the narrator ("male" or "female") to select appropriate voices.
         generate_m4b_audiobook_file (bool, optional): Flag to determine whether to generate an M4B file. Defaults to False.
         book_path (str, optional): The file path for the book to be used in M4B creation. Defaults to an empty string.
+        add_emotion_tags (bool, optional): Whether to apply emotion tags processing for Orpheus TTS. Defaults to False.
 
     Yields:
         str: Progress updates as the audiobook generation progresses through loading text, generating audio,
@@ -158,8 +160,16 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
     # Apply text preprocessing for Orpheus TTS to prevent repetition issues
     if TTS_MODEL.lower() == "orpheus":
         text = preprocess_text_for_tts(text)
+        yield "Applied text preprocessing for Orpheus TTS"
         
-        yield "Applied text preprocessing for Orpheus TTS and saved to converted_book_preprocessed.txt"
+        # Add emotion tags if enabled for Orpheus
+        if add_emotion_tags:
+            yield "Adding emotion tags to enhance narration..."
+            async for progress in add_tags_to_text_chunks(text):
+                yield progress
+            with open("tag_added_lines_chunks.txt", "r") as f:
+                text = f.read()
+            yield "Emotion tags added successfully"
     
     lines = text.split("\n")
     
@@ -214,7 +224,7 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
             combined_audio = AudioSegment.empty()
             
             for part in annotated_parts:
-                text_to_speak = part["text"]
+                text_to_speak = part["text"].strip()
                 voice_to_speak_in = narrator_voice if part["type"] == "narration" else dialogue_voice
                 
                 # Create temporary file for this part
@@ -382,7 +392,7 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
         convert_audio_file_formats("m4a", output_format, "generated_audiobooks", "audiobook")
         yield f"Audiobook in {output_format} format created successfully"
 
-async def generate_audio_with_multiple_voices(output_format, narrator_gender, generate_m4b_audiobook_file=False, book_path=""):
+async def generate_audio_with_multiple_voices(output_format, narrator_gender, generate_m4b_audiobook_file=False, book_path="", add_emotion_tags=False):
     # Path to the JSONL file containing speaker-attributed lines
     """
     Generate an audiobook in the specified format using multiple voices for each line
@@ -403,6 +413,7 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
     :param generate_m4b_audiobook_file: Whether to generate an M4B audiobook file instead of a standard
     M4A file
     :param book_path: The path to the book file (required for generating an M4B audiobook file)
+    :param add_emotion_tags: Whether to apply emotion tags processing for Orpheus TTS. Defaults to False.
     """
     file_path = 'speaker_attributed_book.jsonl'
     json_data_array = []
@@ -423,7 +434,17 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
             if "line" in item and item["line"]:
                 item["line"] = preprocess_text_for_tts(item["line"])
         
-        yield "Applied text preprocessing for Orpheus TTS and saved to speaker_attributed_book_preprocessed.jsonl"
+        yield "Applied text preprocessing for Orpheus TTS"
+        
+        # Add emotion tags if enabled for Orpheus
+        if add_emotion_tags:
+            yield "Adding emotion tags to enhance multi-voice narration..."
+            async for progress in process_emotion_tags_for_jsonl_data(json_data_array):
+                if isinstance(progress, str):
+                    yield progress
+                else:
+                    json_data_array = progress  # Last yielded value is the result
+            yield "Emotion tags added successfully"
 
     # Load mappings for character gender
     character_gender_map = read_json("character_gender_map.json")
@@ -481,7 +502,7 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
             combined_audio = AudioSegment.empty()
             
             for part in annotated_parts:
-                text_to_speak = part["text"]
+                text_to_speak = part["text"].strip()
                 voice_to_speak_in = narrator_voice if part["type"] == "narration" else speaker_voice
                 
                 # Create temporary file for this part
@@ -651,7 +672,7 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
         convert_audio_file_formats("m4a", output_format, "generated_audiobooks", "audiobook")
         yield f"Audiobook in {output_format} format created successfully"
 
-async def process_audiobook_generation(voice_option, narrator_gender, output_format, book_path):
+async def process_audiobook_generation(voice_option, narrator_gender, output_format, book_path, add_emotion_tags=False):
     is_audio_generator_api_up, message = await check_if_audio_generator_api_is_up(async_openai_client)
 
     if not is_audio_generator_api_up:
@@ -665,12 +686,12 @@ async def process_audiobook_generation(voice_option, narrator_gender, output_for
     if voice_option == "Single Voice":
         yield "\n🎧 Generating audiobook with a **single voice**..."
         await asyncio.sleep(1)
-        async for line in generate_audio_with_single_voice(output_format.lower(), narrator_gender, generate_m4b_audiobook_file, book_path):
+        async for line in generate_audio_with_single_voice(output_format.lower(), narrator_gender, generate_m4b_audiobook_file, book_path, add_emotion_tags):
             yield line
     elif voice_option == "Multi-Voice":
         yield "\n🎭 Generating audiobook with **multiple voices**..."
         await asyncio.sleep(1)
-        async for line in generate_audio_with_multiple_voices(output_format.lower(), narrator_gender, generate_m4b_audiobook_file, book_path):
+        async for line in generate_audio_with_multiple_voices(output_format.lower(), narrator_gender, generate_m4b_audiobook_file, book_path, add_emotion_tags):
             yield line
 
     yield f"\n🎧 Audiobook is generated ! You can now download it in the Download section below. Click on the blue download link next to the file name."
@@ -737,15 +758,31 @@ async def main():
         print("\n⚠️ Invalid narrator gender! Please choose from the give options")
         return
 
+    # Prompt user for emotion tags option if using Orpheus TTS
+    add_emotion_tags = False
+    if TTS_MODEL.lower() == "orpheus":
+        print("\n🎭 **Emotion Tags Enhancement (Orpheus TTS)**")
+        print("🔹 Emotion tags add natural expressions like laughter, sighs, gasps to your audiobook")
+        print("🔹 Available tags: <laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>, ")
+        emotion_tags_option = input("🔹 Do you want to add emotion tags to enhance narration? Enter **yes** or **no**: ").strip().lower()
+        
+        if emotion_tags_option in ["yes", "y", "true", "1"]:
+            add_emotion_tags = True
+            print("✅ Emotion tags will be added to enhance your audiobook!")
+        else:
+            print("ℹ️ Emotion tags disabled. Standard narration will be used.")
+    else:
+        print(f"\nℹ️ **Note**: Emotion tags are only available with Orpheus TTS. Current engine: {TTS_MODEL}")
+
     start_time = time.time()
 
     if voice_option == "1":
         print("\n🎧 Generating audiobook with a **single voice**...")
-        async for line in generate_audio_with_single_voice(output_format, narrator_gender, generate_m4b_audiobook_file, book_path):
+        async for line in generate_audio_with_single_voice(output_format, narrator_gender, generate_m4b_audiobook_file, book_path, add_emotion_tags):
             print(line)
     elif voice_option == "2":
         print("\n🎭 Generating audiobook with **multiple voices**...")
-        async for line in generate_audio_with_multiple_voices(output_format, narrator_gender, generate_m4b_audiobook_file, book_path):
+        async for line in generate_audio_with_multiple_voices(output_format, narrator_gender, generate_m4b_audiobook_file, book_path, add_emotion_tags):
             print(line)
     else:
         print("\n⚠️ Invalid option! Please restart and enter either **1** or **2**.")

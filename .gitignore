@@ -8,3 +8,10 @@ todo.md
 .venv/
 .DS_Store
 .env
+character_gender_map.json
+converted_book.txt
+speaker_attributed_book.jsonl
+tag_added_lines_chunks.txt
+chapter_list.txt
+chapters.txt
+cover.jpg
