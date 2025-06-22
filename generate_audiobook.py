@@ -45,6 +45,7 @@ TTS_MODEL = os.environ.get("TTS_MODEL", "kokoro")
 TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE = int(os.environ.get("TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE", 2))
 
 os.makedirs("audio_samples", exist_ok=True)
+os.makedirs("generated_audiobooks", exist_ok=True)
 
 async_openai_client = AsyncOpenAI(
     base_url=TTS_BASE_URL, api_key=TTS_API_KEY
