@@ -26,6 +26,10 @@ RUN uv pip install --system --no-cache-dir --upgrade pip==24.0
 # Install Calibre
 RUN curl -sS https://download.calibre-ebook.com/linux-installer.sh | sh /dev/stdin
 
+# ✅ Make Calibre CLI tools globally accessible
+RUN ln -s /opt/calibre/ebook-convert /usr/local/bin/ebook-convert && \
+    ln -s /opt/calibre/ebook-meta /usr/local/bin/ebook-meta
+
 # Set PYTHONPATH
 ENV PYTHONPATH=/app
 
