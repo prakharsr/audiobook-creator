@@ -39,6 +39,7 @@ KOKORO_API_KEY = os.environ.get("KOKORO_API_KEY", "not-needed")
 KOKORO_MAX_PARALLEL_REQUESTS_BATCH_SIZE = int(os.environ.get("KOKORO_MAX_PARALLEL_REQUESTS_BATCH_SIZE", 2))
 
 os.makedirs("audio_samples", exist_ok=True)
+os.makedirs("generated_audiobooks", exist_ok=True)
 
 async_openai_client = AsyncOpenAI(
     base_url=KOKORO_BASE_URL, api_key=KOKORO_API_KEY
