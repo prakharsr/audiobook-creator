@@ -209,7 +209,7 @@ async def identify_character_gender_and_age_using_llm_and_assign_score(character
         no_think_token = check_if_have_to_include_no_think_token()
 
         # System prompt to guide the LLM in inferring age and gender
-        system_prompt = """
+        system_prompt = f"""
         {no_think_token}
         You are an expert in analyzing character names and inferring their gender and age based on the character's name and the text excerpt. Take into consideration the character name and the text excerpt and then assign the age and gender accordingly. 
         For a masculine character return the gender as 'male', for a feminine character return the gender as 'female' and for a character whose gender is neutral/ unknown return gender as 'unknown'. 
@@ -217,7 +217,7 @@ async def identify_character_gender_and_age_using_llm_and_assign_score(character
         Return only the gender and age as the output. Dont give any explanation or doubt. 
         Give the output as a string in the following format:
         Age: <age>
-        Gender: <gender>""".format(no_think_token=no_think_token)
+        Gender: <gender>"""
 
         # User prompt containing the character name and dialogue context
         user_prompt = f"""

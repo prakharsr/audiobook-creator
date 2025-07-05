@@ -372,7 +372,7 @@ async def enhance_text_with_emotions(text_segment):
 
     no_think_token = check_if_have_to_include_no_think_token()
 
-    system_prompt = """{no_think_token}
+    system_prompt = f"""{no_think_token}
 You are an expert editor specializing in preparing book scripts for Text-to-Speech (TTS) narration. Your task is to analyze text segments and insert specific emotion tags *only* where they are strongly implied and will enhance the audio experience. You must *never* alter the original text in any other way.
 
 **Available Emotion Tags:**
@@ -481,7 +481,7 @@ The room was quiet.
 ```
 
 Now, analyze the following text segment and apply these rules precisely.
-""".format(no_think_token=no_think_token)
+"""
 
     user_prompt = f"""Please analyze this text and add appropriate emotion tags:
 
