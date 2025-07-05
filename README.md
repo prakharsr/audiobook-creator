@@ -43,8 +43,8 @@ Watch the demo video:
 - **Multi-Format Input Support**: Converts books from various formats (EPUB, PDF, etc.) into plain text.
 - **Multi-Format Output Support**: Supports various output formats: AAC, M4A, MP3, WAV, OPUS, FLAC, PCM, M4B.
 - **Docker Support**: Use pre-built docker images/ build using docker compose to save time and for a smooth user experience. 
-- **Text Cleaning**: Ensures the book text is well-formatted and readable.
-- **Character Identification**: Identifies characters and infers their attributes (gender, age) using advanced NLP techniques.
+- **Emotion Tags Addition**: Emotion tags which are supported in Orpheus TTS can be added to the book's text intelligently using an LLM to enhance character voice expression.
+- **Character Identification**: Identifies characters and infers their attributes (gender, age) using advanced NLP techniques and LLMs.
 - **Customizable Audiobook Narration**: Supports single-voice or multi-voice narration with narrator gender preference for enhanced listening experiences.
 - **Progress Tracking**: Includes progress bars and execution time measurements for efficient monitoring.
 - **Open Source**: Licensed under GPL v3.
@@ -107,7 +107,7 @@ Watch the demo video:
    
    To prevent text repetition issues and ensure optimal performance, configure the Orpheus FastAPI with these environment variables in the `.env` file when running the server:
 
-   > **Note**: The `ORPHEUS_TEMPERATURE=0` and `ORPHEUS_TOP_P=1` settings are crucial for preventing text repetition that can occur with Orpheus TTS.
+   > **Note**: The `ORPHEUS_TEMPERATURE=0` and `ORPHEUS_TOP_P=1` settings are crucial for preventing text repetition that can occur with Orpheus TTS. Also make sure you set the context size of loaded model in LMStudio/ llama.cpp to the same value as `ORPHEUS_MAX_TOKENS`.
 
    ```bash
    # API Configuration
