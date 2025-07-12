@@ -2,7 +2,7 @@
 
 ## Overview
 
-Audiobook Creator is an open-source project designed to convert books in various text formats (e.g., EPUB, PDF, etc.) into fully voiced audiobooks with intelligent character voice attribution. It leverages modern Natural Language Processing (NLP), Large Language Models (LLMs), and Text-to-Speech (TTS) technologies to create an engaging and dynamic audiobook experience. The project supports multiple TTS engines including **Kokoro** and **Orpheus**, offering professional-grade audio quality with memory-efficient processing. The project is licensed under the GNU General Public License v3.0 (GPL-3.0), ensuring that it remains free and open for everyone to use, modify, and distribute.
+Audiobook Creator is an open-source project designed to convert books in various text formats (e.g., EPUB, PDF, etc.) into fully voiced audiobooks with intelligent character voice attribution. It leverages modern Natural Language Processing (NLP), Large Language Models (LLMs), and Text-to-Speech (TTS) technologies to create an engaging and dynamic audiobook experience. The project features professional-grade TTS engines including [Kokoro TTS](https://huggingface.co/hexgrad/Kokoro-82M) and [Orpheus-TTS](https://github.com/canopyai/Orpheus-TTS) with advanced async parallel processing, offering exceptional audio quality with memory-efficient processing. The project is licensed under the GNU General Public License v3.0 (GPL-3.0), ensuring that it remains free and open for everyone to use, modify, and distribute.
 
 Sample multi voice audio for a short story : https://audio.com/prakhar-sharma/audio/generated-sample-multi-voice-audiobook
 
@@ -37,7 +37,8 @@ Watch the demo video:
 
 ## Key Features
 
-- **Multi-Engine TTS Support**: Seamlessly switch between Kokoro and Orpheus TTS engines via environment configuration
+- **Advanced TTS Engine Support**: Seamlessly switch between Kokoro and Orpheus TTS engines via environment configuration
+- **Async Parallel Processing**: Optimized for concurrent request handling with significant performance improvements and faster audiobook generation.
 - **Gradio UI App**: Create audiobooks easily with an easy to use, intuitive UI made with Gradio.
 - **M4B Audiobook Creation**: Creates compatible audiobooks with covers, metadata, chapter timestamps etc. in M4B format.
 - **Multi-Format Input Support**: Converts books from various formats (EPUB, PDF, etc.) into plain text.
@@ -100,33 +101,15 @@ Watch the demo video:
     uvicorn api.src.main:app --host 0.0.0.0 --port 8880 --log-level debug \
     --workers 1
    ```
-   ### Option 2: Orpheus TTS 
-   Set up Orpheus TTS following the [Orpheus-TTS FastAPI](https://github.com/Lex-au/Orpheus-FastAPI). Make sure it's running on an OpenAI-compatible endpoint (default: http://localhost:5005/v1). You can either use their docker container to run the model or run the orpheus model using LMStudio and then run the fastapi server. Refer to [this guide](https://github.com/prakharsr/audiobook-creator/?tab=readme-ov-file#parallel-batch-inferencing-of-audio-for-faster-audio-generation) for speeding up audiobook generation.
 
-   #### Orpheus FastAPI Configuration (Recommended)
-   
-   To prevent text repetition issues and ensure optimal performance, configure the Orpheus FastAPI with these environment variables in the `.env` file when running the server:
+   ### Option 2: Orpheus TTS (High-Quality and More Expressive Audio and Support for Emotion Tags)
+   Experience premium audio quality with the Orpheus TTS FastAPI server featuring vLLM backend and bfloat16/ float16/ float32 precision. Set up Orpheus TTS using the dedicated [Orpheus TTS FastAPI](https://github.com/prakharsr/Orpheus-TTS-FastAPI) repository.
 
-   > **Note**: The `ORPHEUS_TEMPERATURE=0` and `ORPHEUS_TOP_P=1` settings are crucial for preventing text repetition that can occur with Orpheus TTS. Also make sure you set the context size of loaded model in LMStudio/ llama.cpp to the same value as `ORPHEUS_MAX_TOKENS`.
+   **IMPORTANT:** Choose only highest possible precision (bf16/ f16/ f32) and this vLLM based FastAPI server as I noticed that using quantized versions of Orpheus or even using float16 GGUF with llama.cpp gave me audio quality issues and artifacts (repeated lines in audio/ extended audio with no spoken text but weird noises/ audio hallucinations/ some other issues). 
 
-   ```bash
-   # API Configuration
-   ORPHEUS_API_URL=http://127.0.0.1:1234/v1/completions # LM Studio endpoint for model inference
-   ORPHEUS_API_TIMEOUT=3600 # API timeout in seconds (1 hour for long generations)
-   ORPHEUS_HOST=0.0.0.0 # Host interface for the FastAPI server
-   ORPHEUS_PORT=5005 # Port for the FastAPI server
-   
-   # Model Configuration  
-   ORPHEUS_MODEL_NAME=Orpheus-3b-FT-Q4_K_M.gguf # Specific Orpheus model file to use
-   ORPHEUS_MAX_TOKENS=8192 # Maximum tokens to generate (prevents runaway generation)
-   
-   # Generation Parameters (Critical for preventing repetition)
-   ORPHEUS_TEMPERATURE=0 # Deterministic generation (0 = no randomness, prevents loops)
-   ORPHEUS_TOP_P=1 # Nucleus sampling threshold (1 = consider all tokens)
-   
-   # Audio Quality
-   ORPHEUS_SAMPLE_RATE=24000 # High-quality audio output sampling rate
-   ```
+   **Setup Instructions:**
+   Please follow the complete setup instructions from the [Orpheus TTS FastAPI repository](https://github.com/prakharsr/Orpheus-TTS-FastAPI) as it contains all the necessary configuration details, installation steps, and optimization guides.
+
 - Create a .env file from .env_sample and configure it with the correct values. Make sure you follow the instructions mentioned at the top of .env_sample to avoid errors.
    ```bash
    cp .env_sample .env
@@ -177,7 +160,7 @@ Watch the demo video:
       ```
    - Make sure your .env is configured correctly and your LLM is running
    - If TTS docker container Kokoro is already running, you can either stop and remove it or comment the kokoro_fastapi service and depends_on param in docker compose. If its not running then it will automatically start when you run docker compose up command
-   - Running Orpheus with docker compose isnt currently supported as its managed by an external project [Orpheus-TTS FastAPI](https://github.com/Lex-au/Orpheus-FastAPI). You can run only Kokoro TTS with docker compose for now
+   - For Orpheus TTS, please refer to the [Orpheus TTS FastAPI repository](https://github.com/prakharsr/Orpheus-TTS-FastAPI) for setup instructions as it provides the optimal implementation.
    - Copy the .env file into the audiobook-creator folder
    - Choose between the types of inference:
    
@@ -258,9 +241,11 @@ Watch the demo video:
 - If you face issues of running out of memory then consider lowering the value for both workers and for the env variable.
 
 #### For Orpheus TTS:
-- If you are running Orpheus model through llama.cpp server with parallel inference enabled (using `--parallel` parameter), you can utilize this `TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE` parameter to speed up inference by making parallel requests to the TTS API.
-- Set this value based on your model's parallel processing capability and available VRAM.
-- Start with a value of 2-4 and adjust based on your system's performance and memory constraints.
+- The Orpheus TTS FastAPI server with vLLM backend provides native async parallel processing capabilities with significant performance improvements (up to 4x faster for long texts).
+- The `TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE` parameter controls the number of concurrent requests to the Orpheus server, taking advantage of its advanced async processing pipeline.
+- **Recommended values**: Start with 4-8 for most setups. Higher values (8-16) can be used with sufficient VRAM and GPU processing power.
+- The server automatically handles intelligent text chunking and parallel token generation, providing optimal performance without manual tuning.
+- For specific configuration and optimization guidance, refer to the [Orpheus TTS FastAPI repository](https://github.com/prakharsr/Orpheus-TTS-FastAPI) documentation.
 
 ## Roadmap
 
