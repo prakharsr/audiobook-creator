@@ -35,6 +35,7 @@ from utils.check_if_audio_generator_api_is_up import check_if_audio_generator_ap
 from utils.voice_mapping import get_narrator_and_dialogue_voices, get_voice_for_character_score, get_narrator_voice_for_character
 from utils.text_preprocessing import preprocess_text_for_tts
 from utils.add_emotion_tags_to_text import add_tags_to_text_chunks, process_emotion_tags_for_jsonl_data
+from utils.llm_utils import generate_audio_with_retry
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -42,7 +43,7 @@ load_dotenv()
 TTS_BASE_URL = os.environ.get("TTS_BASE_URL", "http://localhost:8880/v1")
 TTS_API_KEY = os.environ.get("TTS_API_KEY", "not-needed")
 TTS_MODEL = os.environ.get("TTS_MODEL", "kokoro")
-TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE = int(os.environ.get("TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE", 2))
+TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE = int(os.environ.get("TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE", 1))
 
 os.makedirs("audio_samples", exist_ok=True)
 os.makedirs("generated_audiobooks", exist_ok=True)
@@ -226,6 +227,10 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
             
             for part in annotated_parts:
                 text_to_speak = part["text"].strip()
+
+                if not text_to_speak:
+                    continue
+
                 voice_to_speak_in = narrator_voice if part["type"] == "narration" else dialogue_voice
                 
                 # Create temporary file for this part
@@ -234,19 +239,13 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
                 temp_file.close()
                 
                 try:
-                    # Create an in-memory buffer for the audio data
-                    audio_buffer = bytearray()
-                    
-                    # Generate audio for the part
-                    async with async_openai_client.audio.speech.with_streaming_response.create(
-                        model=TTS_MODEL,
-                        voice=voice_to_speak_in,
-                        response_format="wav",
-                        speed=0.85,
-                        input=text_to_speak
-                    ) as response:
-                        async for chunk in response.iter_bytes():
-                            audio_buffer.extend(chunk)
+                    # Generate audio for the part using retry mechanism
+                    audio_buffer = await generate_audio_with_retry(
+                        async_openai_client, 
+                        TTS_MODEL,
+                        text_to_speak, 
+                        voice_to_speak_in
+                    )
                     
                     # Write part audio to temp file
                     with open(temp_path, "wb") as temp_wav:
@@ -504,6 +503,10 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
             
             for part in annotated_parts:
                 text_to_speak = part["text"].strip()
+
+                if not text_to_speak:
+                    continue
+
                 voice_to_speak_in = narrator_voice if part["type"] == "narration" else speaker_voice
                 
                 # Create temporary file for this part
@@ -512,19 +515,13 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
                 temp_file.close()
                 
                 try:
-                    # Create an in-memory buffer for the audio data
-                    audio_buffer = bytearray()
-                    
-                    # Generate audio for the part
-                    async with async_openai_client.audio.speech.with_streaming_response.create(
-                        model=TTS_MODEL,
-                        voice=voice_to_speak_in,
-                        response_format="wav",
-                        speed=0.85,
-                        input=text_to_speak
-                    ) as response:
-                        async for chunk in response.iter_bytes():
-                            audio_buffer.extend(chunk)
+                    # Generate audio for the part using retry mechanism
+                    audio_buffer = await generate_audio_with_retry(
+                        async_openai_client, 
+                        TTS_MODEL,
+                        text_to_speak, 
+                        voice_to_speak_in
+                    )
                     
                     # Write part audio to temp file
                     with open(temp_path, "wb") as temp_wav:

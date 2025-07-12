@@ -72,7 +72,8 @@ if(gen_for_all_combinations == "yes"):
                 voice=voice,
                 response_format="wav",  # Changed to WAV for consistency
                 speed=0.85,
-                input=text
+                input=text,
+                timeout=3600
             ) as response:
                 file_path = f"audio_samples/{voice}.wav"
                 response.stream_to_file(file_path)
@@ -85,7 +86,8 @@ else:
                 voice=voice,
                 response_format="wav",  # Changed to WAV for consistency
                 speed=0.85,
-                input=text
+                input=text,
+                timeout=3600
             ) as response:
                 file_path = f"audio_samples/{voice}_test.wav"
                 response.stream_to_file(file_path)

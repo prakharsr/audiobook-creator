@@ -31,7 +31,8 @@ async def check_if_audio_generator_api_is_up(client):
             voice="af_heart",
             response_format="wav",  # Changed to WAV for consistency
             speed=0.85,
-            input="Hello, how are you ?"
+            input="Hello, how are you ?",
+            timeout=3600
         ) as response:
             return True, None
     except Exception as e:
