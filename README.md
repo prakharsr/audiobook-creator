@@ -61,9 +61,11 @@ Watch the demo video:
 - `sample_book_and_audio/converted_book.txt`: The cleaned output after text processing.
 - `sample_book_and_audio/speaker_attributed_book.jsonl`: The generated speaker-attributed JSONL file.
 - `sample_book_and_audio/character_gender_map.json`: The generated character metadata.
-- `sample_book_and_audio/sample_multi_voice_audiobook.m4b`: The generated sample multi-voice audiobook in M4B format with cover and chapters from the story.
-- `sample_book_and_audio/sample_multi_voice_audio.mp3`: The generated sample multi-voice MP3 audio file from the story.
-- `sample_book_and_audio/sample_single_voice_audio.mp3`: The generated sample single-voice MP3 audio file from the story.
+- `sample_book_and_audio/sample_orpheus_multi_voice_audiobook.m4b`: The generated sample multi-voice audiobook in M4B format with cover and chapters from the story and with added emotion tags, generated using Orpheus TTS.
+- `sample_book_and_audio/sample_orpheus_multi_voice_audiobook.mp3`: The generated sample multi-voice MP3 audio file from the story, with added emotion tags, generated using Orpheus TTS.
+- `sample_book_and_audio/sample_kokoro_multi_voice_audiobook.m4b`: The generated sample multi-voice audiobook in M4B format with cover and chapters from the story, generated using Kokoro TTS.
+- `sample_book_and_audio/sample_kokoro_multi_voice_audio.mp3`: The generated sample multi-voice MP3 audio file from the story, generated using Kokoro TTS.
+- `sample_book_and_audio/sample_kokoro_single_voice_audio.mp3`: The generated sample single-voice MP3 audio file from the story, generated using Kokoro TTS.
 </details>
 
 ## Get Started
