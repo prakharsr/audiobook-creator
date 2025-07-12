@@ -4,7 +4,9 @@
 
 Audiobook Creator is an open-source project designed to convert books in various text formats (e.g., EPUB, PDF, etc.) into fully voiced audiobooks with intelligent character voice attribution. It leverages modern Natural Language Processing (NLP), Large Language Models (LLMs), and Text-to-Speech (TTS) technologies to create an engaging and dynamic audiobook experience. The project features professional-grade TTS engines including [Kokoro TTS](https://huggingface.co/hexgrad/Kokoro-82M) and [Orpheus-TTS](https://github.com/canopyai/Orpheus-TTS) with advanced async parallel processing, offering exceptional audio quality with memory-efficient processing. The project is licensed under the GNU General Public License v3.0 (GPL-3.0), ensuring that it remains free and open for everyone to use, modify, and distribute.
 
-Sample multi voice audio for a short story : https://audio.com/prakhar-sharma/audio/generated-sample-multi-voice-audiobook
+Sample multi voice audio for a short story generated using *Orpheus TTS* (with added emotions and better sounding audio) : https://audio.com/prakhar-sharma/audio/sample-orpheus-multi-voice-audiobook-orpheus
+
+Sample multi voice audio for a short story generated using *Kokoro TTS* : https://audio.com/prakhar-sharma/audio/generated-sample-multi-voice-audiobook-kokoro
 
 Watch the demo video:
 
