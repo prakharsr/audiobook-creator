@@ -26,9 +26,14 @@ TTS_MODEL = os.environ.get("TTS_MODEL", "kokoro")
 
 async def check_if_audio_generator_api_is_up(client):
     try:
+        voice = None
+        if TTS_MODEL == "kokoro":
+            voice = "af_heart"
+        elif TTS_MODEL == "orpheus":
+            voice = "tara"
         async with client.audio.speech.with_streaming_response.create(
             model=TTS_MODEL,
-            voice="af_heart",
+            voice=voice,
             response_format="wav",  # Changed to WAV for consistency
             speed=0.85,
             input="Hello, how are you ?",
