@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import subprocess
 import re
 import os
+import shutil
 import traceback
 from utils.run_shell_commands import run_shell_command
 
@@ -38,11 +39,11 @@ def get_ebook_metadata_with_cover(book_path):
     Returns:
         dict: A dictionary containing the ebook's metadata.
     """
-    ebook_meta_bin_result = run_shell_command("which ebook-meta")
-    ebook_meta_bin_path = ebook_meta_bin_result.stdout.strip()
+    ebook_meta_bin_result = shutil.which("ebook-meta")
+    ebook_meta_bin_path = ebook_meta_bin_result.strip()
 
     # Command to extract metadata and cover image using ebook-meta
-    command = f"{ebook_meta_bin_path} '{book_path}' --get-cover cover.jpg"
+    command = f"\"{ebook_meta_bin_path}\" \"{book_path}\" --get-cover cover.jpg"
 
     # Run the command and capture the result
     result = run_shell_command(command)
@@ -364,6 +365,9 @@ def merge_chapters_to_m4b(book_path, chapter_files):
     languages = escape_metadata(metadata.get("Languages", ""))
     published_date = escape_metadata(metadata.get("Published", ""))
     comments = escape_metadata(metadata.get("Comments", ""))
+    
+    # ensure generated_audiobooks exists
+    os.makedirs("generated_audiobooks", exist_ok=True)
     
     # Generate chapter metadata
     generate_chapters_file(chapter_files, "chapters.txt")

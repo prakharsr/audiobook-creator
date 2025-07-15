@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import re
+import shutil
 import sys
 import time
 import textract
@@ -38,11 +39,11 @@ def extract_text_from_book_using_calibre(book_path):
     Returns:
         str: The extracted text from the book.
     """
-    ebook_convert_bin_result = run_shell_command("which ebook-convert")
-    ebook_convert_bin_path = ebook_convert_bin_result.stdout.strip()
+    ebook_convert_bin_result = shutil.which("ebook-convert")
+    ebook_convert_bin_path = ebook_convert_bin_result.strip()
 
     # Command to convert the book into a plain text file using ebook-convert
-    command = f"{ebook_convert_bin_path} '{book_path}' extracted_book.txt"
+    command = f"\"{ebook_convert_bin_path}\" \"{book_path}\" extracted_book.txt"
     
     # Execute the command without using a virtual environment
     result = run_shell_command(command)
