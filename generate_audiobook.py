@@ -340,10 +340,23 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
                     # Load as AudioSegment and add to combined audio
                     part_segment = AudioSegment.from_wav(temp_path)
                     combined_audio += part_segment
+                    
+                except Exception as e:
+                    # Log the error for debugging
+                    print(f"Warning: Failed to generate audio for text: '{text_to_speak[:50]}...' - Error: {str(e)}")
+                    # Skip this part and continue with next part
+                    
                 finally:
-                    # Clean up temp file
+                    # Always clean up temp file
                     if os.path.exists(temp_path):
                         os.unlink(temp_path)
+            
+            # Check if we have any audio content before exporting
+            if len(combined_audio) == 0:
+                # If no audio was generated for this line, skip it entirely
+                progress_bar.update(1)
+                progress_counter += 1
+                return None
             
             # Write this line's audio to a temporary file
             line_audio_path = os.path.join(temp_line_audio_dir, f"line_{line_index:06d}.wav")
@@ -629,10 +642,23 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
                     # Load as AudioSegment and add to combined audio
                     part_segment = AudioSegment.from_wav(temp_path)
                     combined_audio += part_segment
+                    
+                except Exception as e:
+                    # Log the error for debugging
+                    print(f"Warning: Failed to generate audio for text: '{text_to_speak[:50]}...' - Error: {str(e)}")
+                    # Skip this part and continue with next part
+                    
                 finally:
-                    # Clean up temp file
+                    # Always clean up temp file
                     if os.path.exists(temp_path):
                         os.unlink(temp_path)
+            
+            # Check if we have any audio content before exporting
+            if len(combined_audio) == 0:
+                # If no audio was generated for this line, skip it entirely
+                progress_bar.update(1)
+                progress_counter += 1
+                return None
             
             # Write this line's audio to a temporary file
             line_audio_path = os.path.join(temp_line_audio_dir, f"line_{line_index:06d}.wav")
