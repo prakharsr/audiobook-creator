@@ -34,7 +34,6 @@ from utils.audiobook_utils import merge_chapters_to_m4b, convert_audio_file_form
 from utils.check_if_audio_generator_api_is_up import check_if_audio_generator_api_is_up
 from utils.voice_mapping import get_narrator_and_dialogue_voices, get_voice_for_character_score, get_narrator_voice_for_character
 from utils.text_preprocessing import preprocess_text_for_tts
-from utils.add_emotion_tags_to_text import add_tags_to_text_chunks, process_emotion_tags_for_jsonl_data
 from utils.llm_utils import generate_audio_with_retry
 from dotenv import load_dotenv
 
@@ -223,7 +222,7 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
         narrator_gender (str): The gender of the narrator ("male" or "female") to select appropriate voices.
         generate_m4b_audiobook_file (bool, optional): Flag to determine whether to generate an M4B file. Defaults to False.
         book_path (str, optional): The file path for the book to be used in M4B creation. Defaults to an empty string.
-        add_emotion_tags (bool, optional): Whether to apply emotion tags processing for Orpheus TTS. Defaults to False.
+        add_emotion_tags (bool, optional): Whether to use pre-applied emotion tags in the audiobook. Defaults to False.
 
     Yields:
         str: Progress updates as the audiobook generation progresses through loading text, generating audio,
@@ -240,22 +239,19 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
             
         yield f"✅ Book validation successful! Title: {metadata.get('Title', 'Unknown')}, Author: {metadata.get('Author(s)', 'Unknown')}"
 
-    with open("converted_book.txt", "r", encoding='utf-8') as f:
-        text = f.read()
-    
-    # Apply text preprocessing for Orpheus TTS to prevent repetition issues
-    if TTS_MODEL.lower() == "orpheus":
-        text = preprocess_text_for_tts(text)
-        yield "Applied text preprocessing for Orpheus TTS"
-
-        # Add emotion tags if enabled for Orpheus
-        if add_emotion_tags:
-            yield "Adding emotion tags to enhance narration..."
-            async for progress in add_tags_to_text_chunks(text):
-                yield progress
-            with open("tag_added_lines_chunks.txt", "r") as f:
-                text = f.read()
-            yield "Emotion tags added successfully"
+    # Check if emotion tags should be used and if they have been pre-applied
+    if add_emotion_tags and os.path.exists("tag_added_lines_chunks.txt"):
+        with open("tag_added_lines_chunks.txt", "r", encoding='utf-8') as f:
+            text = f.read()
+        yield "Using pre-processed text with emotion tags"
+    else:
+        with open("converted_book.txt", "r", encoding='utf-8') as f:
+            text = f.read()
+        
+        # Apply text preprocessing for Orpheus TTS to prevent repetition issues
+        if TTS_MODEL.lower() == "orpheus":
+            text = preprocess_text_for_tts(text)
+            yield "Applied text preprocessing for Orpheus TTS"
     
     lines = text.split("\n")
     
@@ -491,6 +487,45 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
         convert_audio_file_formats("m4a", output_format, "generated_audiobooks", "audiobook")
         yield f"Audiobook in {output_format} format created successfully"
 
+def apply_emotion_tags_to_multi_voice_data(json_data_array):
+    """
+    Dynamically apply pre-processed emotion tags to multi-voice JSONL data.
+    
+    This function reads emotion-enhanced text from tag_added_lines_chunks.txt
+    and applies it to the speaker-attributed JSONL data in memory, preserving
+    speaker attributions while using the enhanced text content.
+    
+    Args:
+        json_data_array (list): Original speaker-attributed JSONL data
+        
+    Returns:
+        tuple: (success, json_data_array, message)
+            - success (bool): True if emotion tags were successfully applied
+            - json_data_array (list): Updated JSONL data with emotion tags
+            - message (str): Status message describing the result
+    """
+    if not os.path.exists("tag_added_lines_chunks.txt"):
+        return False, json_data_array, "No pre-processed emotion tags found"
+    
+    try:
+        # Read the enhanced lines from tag_added_lines_chunks.txt
+        with open("tag_added_lines_chunks.txt", "r", encoding='utf-8') as f:
+            enhanced_lines = f.read().split('\n')
+        
+        # Filter out empty lines to match the original JSONL processing
+        enhanced_lines = [line.strip() for line in enhanced_lines if line.strip()]
+        
+        # Dynamically create enhanced JSONL data by matching enhanced lines with original speaker attributions
+        if len(enhanced_lines) == len(json_data_array):
+            for i, item in enumerate(json_data_array):
+                item["line"] = enhanced_lines[i]
+            return True, json_data_array, "Successfully applied pre-processed emotion tags"
+        else:
+            return False, json_data_array, f"Line count mismatch: {len(enhanced_lines)} enhanced lines vs {len(json_data_array)} speaker-attributed lines"
+            
+    except Exception as e:
+        return False, json_data_array, f"Error applying emotion tags: {str(e)}"
+
 async def generate_audio_with_multiple_voices(output_format, narrator_gender, generate_m4b_audiobook_file=False, book_path="", add_emotion_tags=False):
     # Path to the JSONL file containing speaker-attributed lines
     """
@@ -512,7 +547,7 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
     :param generate_m4b_audiobook_file: Whether to generate an M4B audiobook file instead of a standard
     M4A file
     :param book_path: The path to the book file (required for generating an M4B audiobook file)
-    :param add_emotion_tags: Whether to apply emotion tags processing for Orpheus TTS. Defaults to False.
+    :param add_emotion_tags: Whether to use pre-applied emotion tags in the audiobook. Defaults to False.
     """
     
     # Early validation for M4B generation
@@ -538,23 +573,39 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
 
     yield "Loaded speaker-attributed lines from JSONL file"
 
+    # Apply emotion tags if requested and available
+    if add_emotion_tags:
+        success, json_data_array, message = apply_emotion_tags_to_multi_voice_data(json_data_array)
+        if success:
+            yield f"✅ {message}"
+        else:
+            yield f"⚠️ {message}"
+            yield "Falling back to original text without emotion tags"
+    else:
+        # Check if emotion tags exist in the original JSONL data and remove them if user doesn't want them
+        has_emotion_tags = any(
+            '<laugh>' in item.get('line', '') or '<chuckle>' in item.get('line', '') or
+            '<sigh>' in item.get('line', '') or '<cough>' in item.get('line', '') or
+            '<sniffle>' in item.get('line', '') or '<groan>' in item.get('line', '') or
+            '<yawn>' in item.get('line', '') or '<gasp>' in item.get('line', '')
+            for item in json_data_array
+        )
+        
+        if has_emotion_tags:
+            yield "Removing existing emotion tags from JSONL data as per user preference"
+            import re
+            for item in json_data_array:
+                if "line" in item and item["line"]:
+                    # Remove emotion tags from the line
+                    line_without_tags = re.sub(r'<(?:laugh|chuckle|sigh|cough|sniffle|groan|yawn|gasp)>\s*', '', item["line"])
+                    item["line"] = line_without_tags
+    
     # Apply text preprocessing for Orpheus TTS to prevent repetition issues
     if TTS_MODEL.lower() == "orpheus":
         for item in json_data_array:
             if "line" in item and item["line"]:
                 item["line"] = preprocess_text_for_tts(item["line"])
-        
         yield "Applied text preprocessing for Orpheus TTS"
-        
-        # Add emotion tags if enabled for Orpheus
-        if add_emotion_tags:
-            yield "Adding emotion tags to enhance multi-voice narration..."
-            async for progress in process_emotion_tags_for_jsonl_data(json_data_array):
-                if isinstance(progress, str):
-                    yield progress
-                else:
-                    json_data_array = progress  # Last yielded value is the result
-            yield "Emotion tags added successfully"
 
     # Load mappings for character gender
     character_gender_map = read_json("character_gender_map.json")
@@ -925,12 +976,12 @@ async def main():
     if TTS_MODEL.lower() == "orpheus":
         print("\n🎭 **Emotion Tags Enhancement (Orpheus TTS)**")
         print("🔹 Emotion tags add natural expressions like laughter, sighs, gasps to your audiobook")
-        print("🔹 Available tags: <laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>, ")
-        emotion_tags_option = input("🔹 Do you want to add emotion tags to enhance narration? Enter **yes** or **no**: ").strip().lower()
+        print("🔹 Available tags: <laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>")
+        emotion_tags_option = input("🔹 Do you want to use emotion tags in the audiobook? Enter **yes** or **no**: ").strip().lower()
         
         if emotion_tags_option in ["yes", "y", "true", "1"]:
             add_emotion_tags = True
-            print("✅ Emotion tags will be added to enhance your audiobook!")
+            print("✅ Emotion tags will be used in the audiobook!")
         else:
             print("ℹ️ Emotion tags disabled. Standard narration will be used.")
     else:

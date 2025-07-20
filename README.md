@@ -13,7 +13,7 @@ Watch the demo video:
 [![Watch the demo video](https://img.youtube.com/vi/E5lUQoBjquo/maxresdefault.jpg)](https://www.youtube.com/watch?v=E5lUQoBjquo)
 
 <details>
-<summary>The project consists of three main components:</summary>
+<summary>The project consists of four main components:</summary>
 
 1. **Text Cleaning and Formatting (`book_to_txt.py`)**:
    - Extracts and cleans text from a book file (e.g., `book.epub`).
@@ -28,7 +28,13 @@ Watch the demo video:
      - `speaker_attributed_book.jsonl`: Each line of text annotated with the identified speaker.
      - `character_gender_map.json`: Metadata about characters, including name, age, gender, and gender score.
 
-3. **Audiobook Generation (`generate_audiobook.py`)**:
+3. **Emotion Tags Enhancement (`add_emotion_tags.py`)**:
+   - Adds emotion tags (e.g., `<laugh>`, `<sigh>`, `<gasp>` etc.) to enhance narration expressiveness.
+   - Processes `converted_book.txt` and outputs enhanced text to `tag_added_lines_chunks.txt`.
+   - Voice-agnostic: works with both single-voice and multi-voice audiobook generation.
+   - Requires Orpheus TTS engine for emotion tag support.
+
+4. **Audiobook Generation (`generate_audiobook.py`)**:
    - Converts the cleaned text (`converted_book.txt`) or speaker-attributed text (`speaker_attributed_book.jsonl`) into an audiobook using advanced TTS models.
    - **Multi-Engine Support**: Compatible with both Kokoro TTS ([Hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)) and Orpheus TTS ([Orpheus-TTS](https://github.com/canopyai/Orpheus-TTS)) with engine-specific voice mapping.
    - Offers two narration modes:

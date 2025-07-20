@@ -193,8 +193,32 @@ async def find_book_protagonist_using_search_engine_and_llm(book_title, async_op
                     for p in paragraphs[:5]:
                         search_results.append(p.get_text(strip=True))
         
-        # Combine results into a single text
-        combined_text = "\n\n".join(search_results)
+        # Limit individual search results to avoid overwhelming the model
+        limited_search_results = []
+        max_words_per_result = 150  # Limit each search result to 150 words
+        max_total_words = 800  # Limit total context to 800 words
+        
+        total_words = 0
+        for result in search_results:
+            # Split the result into words and limit it
+            words = result.split()
+            if len(words) > max_words_per_result:
+                words = words[:max_words_per_result]
+            
+            # Check if adding this result would exceed total word limit
+            if total_words + len(words) > max_total_words:
+                # Only add partial result to stay within limit
+                remaining_words = max_total_words - total_words
+                if remaining_words > 0:
+                    words = words[:remaining_words]
+                    limited_search_results.append(" ".join(words))
+                break
+            
+            limited_search_results.append(" ".join(words))
+            total_words += len(words)
+        
+        # Combine limited results into a single text
+        combined_text = "\n\n".join(limited_search_results)
         
         # If we have search results, use LLM to extract the protagonist
         if combined_text:
