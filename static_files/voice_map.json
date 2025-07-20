@@ -38,29 +38,29 @@
         "female_dialogue": "leah",
         "male_score_map": {
             "0": "zac",
-            "1": "zac",
+            "1": "leo",
             "2": "dan",
             "3": "dan",
             "4": "zac",
-            "5": "jess",
-            "6": "zoe",
+            "5": "zoe",
+            "6": "jess",
             "7": "tara",
             "8": "tara",
             "9": "leah",
-            "10": "leah"
+            "10": "mia"
         },
         "female_score_map": {
             "0": "tara",
-            "1": "dan",
+            "1": "leo",
             "2": "dan",
             "3": "zac",
             "4": "zac",
-            "5": "tara",
+            "5": "zoe",
             "6": "jess",
             "7": "jess",
-            "8": "zoe",
+            "8": "leah",
             "9": "leah",
-            "10": "leah"
+            "10": "mia"
         }
     }
 }
