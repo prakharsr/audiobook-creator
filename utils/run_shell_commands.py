@@ -20,51 +20,8 @@ import subprocess
 import shutil
 import os
 import traceback
-
-def get_system_python_paths():
-    """
-    Returns a list of directories containing Python packages in the system
-    excluding the virtual environment.
-    
-    The function works by iterating over common base directories for Python
-    packages and checking if they exist. The directories are then added to a
-    list which is returned.
-    """
-    
-    # Get Python version
-    python_version = subprocess.run(
-        ["/usr/bin/python3", "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
-        capture_output=True,
-        text=True
-    ).stdout.strip()
-    
-    # Common base directories for Python packages
-    base_dirs = [
-        "/usr/lib/python3",  # Default installation directory for Python packages
-        "/usr/local/lib/python3",  # Directory for user-installed packages
-        f"/usr/lib/python{python_version}",  # Specific Python version directory
-        f"/usr/local/lib/python{python_version}"  # Specific Python version directory
-    ]
-    
-    # Common package directories
-    package_dirs = [
-        "dist-packages",  # Debian/Ubuntu packages
-        "site-packages"  # Python packages installed using pip
-    ]
-    
-    # Find all existing paths
-    system_paths = []
-    for base in base_dirs:
-        for package_dir in package_dirs:
-            path = os.path.join(base, package_dir)
-            if os.path.exists(path):
-                system_paths.append(path)
-                
-        # Also check for direct dist-packages in python3 directory
-        if os.path.exists(base) and os.path.isdir(base):
-            system_paths.append(base)
-            
-    return list(set(system_paths))  # Remove duplicates
+import shlex
+import re
 
 def check_if_calibre_is_installed():
     """
@@ -96,68 +53,184 @@ def check_if_ffmpeg_is_installed():
         # If the command is not available in the PATH, FFmpeg is not installed
         return False
 
-def run_shell_command_without_virtualenv(command):
+def validate_file_path_allowlist(file_path):
     """
-    Runs a shell command without using a virtual environment.
-
-    This function is useful when a shell command needs to be run without
-    using the dependencies installed in the virtual environment. It
-    temporarily modifies the environment to include the system Python
-    paths and then runs the command with the modified environment.
-
+    Validates file paths using allowlist regex patterns (secure approach).
+    Only allows safe file path patterns and rejects everything else.
+    
     Args:
-        command (str): The shell command to run.
-
+        file_path (str): The file path to validate
+        
     Returns:
-        subprocess.CompletedProcess: The result of the command execution.
+        bool: True if path matches safe patterns, False otherwise
     """
-    # Get the original PYTHONPATH
-    original_pythonpath = os.environ.get('PYTHONPATH', '')
+    if not file_path or not isinstance(file_path, str):
+        return False
     
-    try:
-        # Temporarily modify the environment
-        modified_env = os.environ.copy()
-        
-        # Get system Python paths automatically
-        system_paths = get_system_python_paths()
-        
-        if not system_paths:
-            raise Exception("No system Python paths found")
-            
-        modified_env['PYTHONPATH'] = ':'.join(system_paths + [original_pythonpath])
-        
-        # Run the command with modified environment
-        cmd = f"/usr/bin/python3 {command}"
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            env=modified_env,
-            capture_output=True,
-            text=True
-        )
+    # Allowlist pattern for safe file paths
+    # Allows: letters, numbers, spaces, hyphens, underscores, dots, forward slashes
+    # Specifically excludes shell metacharacters and command injection patterns
+    safe_path_pattern = r"^[a-zA-Z0-9\s\-_.:/'\\]+\.[a-zA-Z0-9]{1,10}$|^[a-zA-Z0-9\s\-_.:/'\\]+/$"
+    
+    # Additional check for relative path traversal
+    safe_relative_pattern = r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\]+$"
+    
+    return (re.match(safe_path_pattern, file_path) is not None and 
+            re.match(safe_relative_pattern, file_path) is not None)
 
-        return result
-        
-    except Exception as e:
-        print(f"Error: {e}")
-        traceback.print_exc()
-        return None
+def validate_command_arguments_allowlist(args):
+    """
+    Validates command arguments using allowlist patterns.
     
-def run_shell_command(command):
+    Args:
+        args (list): List of command arguments
+        
+    Returns:
+        bool: True if all arguments are safe, False otherwise
+    """
+    if not isinstance(args, list):
+        return False
+    
+    for arg in args:
+        if not isinstance(arg, str):
+            return False
+
+        # Disallow directory traversal early
+        if ".." in arg:
+            return False
+            
+        # Allow safe argument patterns:
+        safe_arg_patterns = [
+            # File paths and extensions (no '..')
+            r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\]+\.[a-zA-Z0-9]{1,10}$",
+            # Directory paths (no '..')
+            r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\]+/?$",
+            # Command flags like -y, --verbose, -map_metadata
+            r'^-{1,2}[a-zA-Z0-9\-_:]+$',
+            # Numbers with optional size suffixes and standalone numbers
+            r'^\d+[kmgtKMGT]?$',
+            # Boolean values
+            r'^(true|false|yes|no|on|off)$',
+            # FFmpeg-style arguments with colons (like disposition:v:0)
+            r'^[a-zA-Z0-9\-_]+:[a-zA-Z0-9\-_:]+$',
+            # Basic alphanumeric values with safe punctuation
+            r'^[a-zA-Z0-9\-_+=:,]+$',
+            # Metadata values (key=value with spaces, apostrophes, brackets)
+            r'^[a-zA-Z0-9\-_]+=[\w\s\-_.,:()[\]\'\"!?]+$',
+            # Date/time formats (ISO 8601 style)
+            r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$',
+            # Language codes and simple identifiers
+            r'^[a-zA-Z]{2,3}$',
+            # Simple words and phrases with common punctuation
+            r'^[\w\s\-_.()[\]\'\"!?,:]+$',
+        ]
+        
+        # Check if argument matches any safe pattern
+        is_safe = any(re.match(pattern, arg, re.IGNORECASE) for pattern in safe_arg_patterns)
+        
+        if not is_safe:
+            # For debugging: print which argument failed validation
+            # print(f"Argument failed validation: {arg}")
+            return False
+    
+    return True
+
+def validate_command_safety(command):
+    """
+    Validates that a command is safe using allowlist approach.
+    
+    Args:
+        command (str or list): The command to validate
+        
+    Returns:
+        bool: True if command appears safe, False otherwise
+    """
+    if isinstance(command, str):
+        try:
+            cmd_parts = shlex.split(command)
+        except ValueError:
+            return False  # Invalid shell syntax
+    else:
+        cmd_parts = command
+    
+    if not cmd_parts or len(cmd_parts) == 0:
+        return False
+    
+    # Validate command name (first argument)
+    command_name = cmd_parts[0]
+    
+    # Allow common safe installation paths and simple command names
+    safe_command_patterns = [
+        r'^[a-zA-Z0-9\-_]+$',  # Simple command names like 'ffmpeg', 'which'
+        r'^[a-zA-Z0-9\-_./]+$',  # Paths with basic separators
+        r'^/usr/bin/[a-zA-Z0-9\-_]+$',  # Standard /usr/bin/ paths
+        r'^/usr/local/bin/[a-zA-Z0-9\-_]+$',  # Local installation paths
+        r'^/opt/[a-zA-Z0-9\-_.]+/[a-zA-Z0-9\-_./]+$',  # /opt/ installations
+        r'^/Applications/[a-zA-Z0-9\-_.]+\.app/Contents/MacOS/[a-zA-Z0-9\-_]+$',  # macOS app bundles
+    ]
+    
+    # Check if command name matches any safe pattern
+    is_safe_command = any(re.match(pattern, command_name) for pattern in safe_command_patterns)
+    
+    if not is_safe_command:
+        return False
+    
+    # Validate all arguments using allowlist
+    if len(cmd_parts) > 1:
+        return validate_command_arguments_allowlist(cmd_parts[1:])
+    
+    return True
+
+def run_shell_command_secure(command, allowed_commands=None):
+    """
+    Securely runs a shell command using list-based subprocess calls.
+    
+    Args:
+        command (str or list): The command to run
+        allowed_commands (list): List of allowed command names (optional)
+        
+    Returns:
+        subprocess.CompletedProcess: The result of the command execution
+    """
     try:
+        # Convert string command to list for security
+        if isinstance(command, str):
+            # For simple commands, try to parse safely
+            cmd_parts = shlex.split(command)
+        else:
+            cmd_parts = command
+            
+        if not cmd_parts or len(cmd_parts) == 0:
+            return False
+            
+        # Validate command safety
+        if not validate_command_safety(cmd_parts):
+            raise ValueError(f"Command contains potentially dangerous patterns: {cmd_parts}")
+            
+        # Check if command is in allowed list (compare basename for full paths)
+        if allowed_commands:
+            command_name = cmd_parts[0]
+            # Extract basename from full path for comparison
+            command_basename = os.path.basename(command_name)
+            
+            if command_basename not in allowed_commands:
+                raise ValueError(f"Command '{command_basename}' not in allowed commands list")
+            
+        # Execute with secure subprocess call (no shell=True)
         result = subprocess.run(
-            command,
-            shell=True,
+            cmd_parts,
             capture_output=True,
-            text=True
+            text=True,
+            check=False,  # Don't raise exception on non-zero exit
+            env=os.environ.copy() # Pass environment variables explicitly
         )
-        if(result.stderr):
+        
+        if result.stderr and result.returncode != 0:
             raise Exception(result.stderr)
 
         return result
         
     except Exception as e:
-        print(e)
+        print(f"Error in run_shell_command_secure: {e}")
         traceback.print_exc()
-        print("Error in run_shell_command, running  run_shell_command_without_virtualenv")
-        return run_shell_command_without_virtualenv(command)
+        return None

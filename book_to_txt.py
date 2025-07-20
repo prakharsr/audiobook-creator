@@ -22,9 +22,38 @@ import time
 import textract
 import traceback
 import shlex
-from utils.run_shell_commands import run_shell_command, check_if_calibre_is_installed
+import os
+import subprocess
+from utils.run_shell_commands import check_if_calibre_is_installed, run_shell_command_secure, validate_file_path_allowlist
+
+def validate_book_path(book_path):
+    """
+    Validates that a book file path is safe using allowlist approach.
+    
+    Args:
+        book_path (str): The path to the book file
+        
+    Returns:
+        bool: True if path is safe and file exists, False otherwise
+    """
+    if not book_path or not isinstance(book_path, str):
+        return False
+    
+    # Use allowlist-based validation  
+    if not validate_file_path_allowlist(book_path):
+        return False
+        
+    # Check if file exists and is readable
+    try:
+        return os.path.exists(book_path) and os.access(book_path, os.R_OK)
+    except (OSError, TypeError):
+        return False
 
 def extract_text_from_book_using_textract(book_path):
+    # Validate book path first
+    if not validate_book_path(book_path):
+        raise ValueError(f"Invalid or unsafe book path: {book_path}")
+        
     text: str = textract.process(book_path, encoding='utf-8').decode() # decode using textract
 
     return text
@@ -39,19 +68,36 @@ def extract_text_from_book_using_calibre(book_path):
     Returns:
         str: The extracted text from the book.
     """
-    ebook_convert_bin_result = run_shell_command("which ebook-convert")
+    # Validate book path first
+    if not validate_book_path(book_path):
+        raise ValueError(f"Invalid or unsafe book path: {book_path}")
+        
+    # Get ebook-convert binary path securely
+    allowed_commands = ['which']
+    ebook_convert_bin_result = run_shell_command_secure("which ebook-convert", allowed_commands)
+    
+    if not ebook_convert_bin_result or not ebook_convert_bin_result.stdout.strip():
+        raise RuntimeError("ebook-convert command not found")
+        
     ebook_convert_bin_path = ebook_convert_bin_result.stdout.strip()
 
-    # Command to convert the book into a plain text file using ebook-convert
-    # Use shlex.quote to properly escape the book path for shell execution
-    command = f"{ebook_convert_bin_path} {shlex.quote(book_path)} extracted_book.txt"
+    # Build secure command as list
+    command = [ebook_convert_bin_path, book_path, "extracted_book.txt"]
     
-    # Execute the command without using a virtual environment
-    result = run_shell_command(command)
+    # Execute the command securely using our centralized function
+    allowed_ebook_commands = ['ebook-convert']
+    result = run_shell_command_secure(command, allowed_ebook_commands)
+    
+    if not result or result.returncode != 0:
+        error_msg = result.stderr if result else "Unknown error"
+        raise RuntimeError(f"Failed to convert book: {error_msg}")
 
     # Open the resulting text file and read its contents
-    with open("extracted_book.txt", "r", encoding='utf-8') as f:
-        book_text = f.read()
+    try:
+        with open("extracted_book.txt", "r", encoding='utf-8') as f:
+            book_text = f.read()
+    except (OSError, IOError) as e:
+        raise RuntimeError(f"Failed to read extracted book: {e}")
 
     return book_text
 
@@ -229,6 +275,10 @@ def process_book_and_extract_text(
     book_path: str,
     text_decoding_option: str = "textract"
 ):
+    # Early validation of book path
+    if not validate_book_path(book_path):
+        raise ValueError(f"Invalid or unsafe book file: {book_path}. Please check the file path and permissions.")
+    
     if text_decoding_option == "calibre":
         text: str = extract_text_from_book_using_calibre(book_path)
     else:
@@ -281,6 +331,17 @@ def main():
             book_path = input_path
         print(f"📂 Using book file: **{book_path}**")
 
+    # Early validation of book path
+    print("🔍 Validating book file...")
+    if not validate_book_path(book_path):
+        print(f"❌ **Book validation failed**: Invalid or inaccessible book file: {book_path}")
+        print("\n💡 **Troubleshooting Tips:**")
+        print("   • Ensure the book file path is correct and the file exists")
+        print("   • Check that the file is readable and not corrupted")
+        print("   • Verify file permissions")
+        return
+        
+    print("✅ Book file validation successful!")
     print("✅ Book path set. Proceeding...\n")
 
     print("\n🔧 Text Decoding Options:\n")

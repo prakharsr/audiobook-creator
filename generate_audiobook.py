@@ -30,7 +30,7 @@ import sys
 from pydub import AudioSegment
 from utils.run_shell_commands import check_if_ffmpeg_is_installed, check_if_calibre_is_installed
 from utils.file_utils import read_json, empty_directory
-from utils.audiobook_utils import merge_chapters_to_m4b, convert_audio_file_formats, add_silence_to_audio_file_by_reencoding_using_ffmpeg, merge_chapters_to_standard_audio_file, add_silence_to_audio_file_by_appending_pre_generated_silence, assemble_chapter_with_ffmpeg, add_silence_to_chapter_with_ffmpeg
+from utils.audiobook_utils import merge_chapters_to_m4b, convert_audio_file_formats, add_silence_to_audio_file_by_reencoding_using_ffmpeg, merge_chapters_to_standard_audio_file, add_silence_to_audio_file_by_appending_pre_generated_silence, assemble_chapter_with_ffmpeg, add_silence_to_chapter_with_ffmpeg, get_ebook_metadata_with_cover, validate_file_path
 from utils.check_if_audio_generator_api_is_up import check_if_audio_generator_api_is_up
 from utils.voice_mapping import get_narrator_and_dialogue_voices, get_voice_for_character_score, get_narrator_voice_for_character
 from utils.text_preprocessing import preprocess_text_for_tts
@@ -134,6 +134,50 @@ def find_voice_for_gender_score(character: str, character_gender_map, engine_nam
         # Fallback for unknown characters - use score 5 (neutral)
         return get_voice_for_character_score(engine_name, narrator_gender, 5)
 
+def validate_book_for_m4b_generation(book_path):
+    """
+    Validates that the book file is suitable for M4B audiobook generation.
+    
+    This function performs early validation to catch issues before audio generation:
+    - Checks if the book file path is safe and accessible
+    - Verifies that ebook-meta command is available
+    - Tests metadata extraction from the book
+    - Ensures cover image can be extracted
+    
+    Args:
+        book_path (str): Path to the book file
+        
+    Returns:
+        tuple: (is_valid, error_message, metadata)
+            - is_valid (bool): True if validation passed
+            - error_message (str): Error description if validation failed, None if passed
+            - metadata (dict): Extracted metadata if successful, None if failed
+    """
+    try:
+        # Validate file path safety and existence
+        if not validate_file_path(book_path):
+            return False, f"Invalid or inaccessible book file: {book_path}. Please check the file path and permissions.", None
+        
+        # Test metadata extraction (this also validates ebook-meta availability)
+        metadata = get_ebook_metadata_with_cover(book_path)
+        
+        # Check if we got meaningful metadata
+        if not metadata or len(metadata) == 0:
+            return False, f"No metadata could be extracted from the book file: {book_path}. Please ensure it's a valid ebook format.", None
+            
+        # Check if cover extraction worked (cover.jpg should exist after get_ebook_metadata_with_cover)
+        if not validate_file_path("cover.jpg"):
+            return False, f"Could not extract cover image from the book file: {book_path}. The book may not contain a cover image.", None
+            
+        return True, None, metadata
+        
+    except ValueError as e:
+        return False, f"Book file validation error: {str(e)}", None
+    except RuntimeError as e:
+        return False, f"Ebook processing error: {str(e)}. Please ensure Calibre is properly installed and the book file is not corrupted.", None
+    except Exception as e:
+        return False, f"Unexpected error during book validation: {str(e)}", None
+
 async def generate_audio_with_single_voice(output_format, narrator_gender, generate_m4b_audiobook_file=False, book_path="", add_emotion_tags=False):
     # Read the text from the file
     """
@@ -155,6 +199,16 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
         str: Progress updates as the audiobook generation progresses through loading text, generating audio,
              organizing by chapters, assembling chapters, and post-processing steps.
     """
+    
+    # Early validation for M4B generation
+    if generate_m4b_audiobook_file:
+        yield "Validating book file for M4B audiobook generation..."
+        is_valid, error_message, metadata = validate_book_for_m4b_generation(book_path)
+        
+        if not is_valid:
+            raise ValueError(f"❌ Book validation failed: {error_message}")
+            
+        yield f"✅ Book validation successful! Title: {metadata.get('Title', 'Unknown')}, Author: {metadata.get('Author(s)', 'Unknown')}"
 
     with open("converted_book.txt", "r", encoding='utf-8') as f:
         text = f.read()
@@ -415,6 +469,17 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
     :param book_path: The path to the book file (required for generating an M4B audiobook file)
     :param add_emotion_tags: Whether to apply emotion tags processing for Orpheus TTS. Defaults to False.
     """
+    
+    # Early validation for M4B generation
+    if generate_m4b_audiobook_file:
+        yield "Validating book file for M4B audiobook generation..."
+        is_valid, error_message, metadata = validate_book_for_m4b_generation(book_path)
+        
+        if not is_valid:
+            raise ValueError(f"❌ Book validation failed: {error_message}")
+            
+        yield f"✅ Book validation successful! Title: {metadata.get('Title', 'Unknown')}, Author: {metadata.get('Author(s)', 'Unknown')}"
+    
     file_path = 'speaker_attributed_book.jsonl'
     json_data_array = []
 
@@ -681,18 +746,37 @@ async def process_audiobook_generation(voice_option, narrator_gender, output_for
     if output_format == "M4B (Chapters & Cover)":
         generate_m4b_audiobook_file = True
 
-    if voice_option == "Single Voice":
-        yield "\n🎧 Generating audiobook with a **single voice**..."
-        await asyncio.sleep(1)
-        async for line in generate_audio_with_single_voice(output_format.lower(), narrator_gender, generate_m4b_audiobook_file, book_path, add_emotion_tags):
-            yield line
-    elif voice_option == "Multi-Voice":
-        yield "\n🎭 Generating audiobook with **multiple voices**..."
-        await asyncio.sleep(1)
-        async for line in generate_audio_with_multiple_voices(output_format.lower(), narrator_gender, generate_m4b_audiobook_file, book_path, add_emotion_tags):
-            yield line
+    try:
+        if voice_option == "Single Voice":
+            yield "\n🎧 Generating audiobook with a **single voice**..."
+            await asyncio.sleep(1)
+            async for line in generate_audio_with_single_voice(output_format.lower(), narrator_gender, generate_m4b_audiobook_file, book_path, add_emotion_tags):
+                yield line
+        elif voice_option == "Multi-Voice":
+            yield "\n🎭 Generating audiobook with **multiple voices**..."
+            await asyncio.sleep(1)
+            async for line in generate_audio_with_multiple_voices(output_format.lower(), narrator_gender, generate_m4b_audiobook_file, book_path, add_emotion_tags):
+                yield line
 
-    yield f"\n🎧 Audiobook is generated ! You can now download it in the Download section below. Click on the blue download link next to the file name."
+        yield f"\n🎧 Audiobook is generated ! You can now download it in the Download section below. Click on the blue download link next to the file name."
+        
+    except ValueError as e:
+        # Handle validation errors specifically
+        error_msg = str(e)
+        if "Book validation failed" in error_msg:
+            yield f"\n❌ **Book Validation Error**: {error_msg}"
+            yield "\n💡 **Troubleshooting Tips:**"
+            yield "   • Ensure the book file path is correct and the file exists"
+            yield "   • Verify the book file is a supported ebook format (EPUB, MOBI, PDF, etc.)"
+            yield "   • Check that Calibre is properly installed and ebook-meta command is available"
+            yield "   • Make sure the book file is not corrupted"
+            yield "   • Ensure the book file contains extractable metadata and cover image"
+        else:
+            yield f"\n❌ **Validation Error**: {error_msg}"
+        raise e
+    except Exception as e:
+        yield f"\n❌ **Unexpected Error**: {str(e)}"
+        raise e
 
 async def main():
     os.makedirs("generated_audiobooks", exist_ok=True)
@@ -737,6 +821,26 @@ async def main():
             print(f"📂 Using book file: **{book_path}**")
 
         print("✅ Book path set. Proceeding...\n")
+        
+        # Early validation of the book file for M4B generation
+        print("🔍 Validating book file for M4B audiobook generation...")
+        is_valid, error_message, metadata = validate_book_for_m4b_generation(book_path)
+        
+        if not is_valid:
+            print(f"❌ **Book validation failed**: {error_message}")
+            print("\n💡 **Troubleshooting Tips:**")
+            print("   • Ensure the book file path is correct and the file exists")
+            print("   • Verify the book file is a supported ebook format (EPUB, MOBI, PDF, etc.)")
+            print("   • Check that Calibre is properly installed and ebook-meta command is available")
+            print("   • Make sure the book file is not corrupted")
+            print("   • Ensure the book file contains extractable metadata and cover image")
+            return
+            
+        print(f"✅ **Book validation successful!**")
+        print(f"   • Title: {metadata.get('Title', 'Unknown')}")
+        print(f"   • Author: {metadata.get('Author(s)', 'Unknown')}")
+        print(f"   • Cover image: Successfully extracted")
+        print()
 
         generate_m4b_audiobook_file = True
     else:

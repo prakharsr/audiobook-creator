@@ -21,13 +21,40 @@ import re
 import os
 import traceback
 import shlex
-from utils.run_shell_commands import run_shell_command
+import json
+from utils.run_shell_commands import run_shell_command_secure, validate_file_path_allowlist
 
 # Escape double quotes by replacing them with \"
 def escape_metadata(value):
     if value:
-        return value.replace('"', '\\"')  # Escape double quotes
+        # Remove any potentially dangerous characters for metadata
+        # Keep only alphanumeric, spaces, common punctuation
+        safe_chars = re.sub(r'[^\w\s\-.,!?\'"()[\]:;]', '', str(value))
+        return safe_chars.replace('"', '\\"')  # Escape double quotes
     return ""
+
+def validate_file_path(file_path):
+    """
+    Validates that a file path is safe using allowlist approach.
+    
+    Args:
+        file_path (str): The file path to validate
+        
+    Returns:
+        bool: True if path is safe, False otherwise
+    """
+    if not file_path or not isinstance(file_path, str):
+        return False
+    
+    # Use allowlist-based validation
+    if not validate_file_path_allowlist(file_path):
+        return False
+        
+    # Check if file exists and is readable
+    try:
+        return os.path.exists(file_path) and os.access(file_path, os.R_OK)
+    except (OSError, TypeError):
+        return False
 
 def get_ebook_metadata_with_cover(book_path):
     """
@@ -39,15 +66,28 @@ def get_ebook_metadata_with_cover(book_path):
     Returns:
         dict: A dictionary containing the ebook's metadata.
     """
-    ebook_meta_bin_result = run_shell_command("which ebook-meta")
+    # Validate file path
+    if not validate_file_path(book_path):
+        raise ValueError(f"Invalid or unsafe book path: {book_path}")
+        
+    # Get ebook-meta binary path securely
+    allowed_commands = ['which', 'ebook-meta']
+    ebook_meta_bin_result = run_shell_command_secure("which ebook-meta", allowed_commands)
+    
+    if not ebook_meta_bin_result or not ebook_meta_bin_result.stdout.strip():
+        raise RuntimeError("ebook-meta command not found")
+        
     ebook_meta_bin_path = ebook_meta_bin_result.stdout.strip()
 
-    # Command to extract metadata and cover image using ebook-meta
-    # Use shlex.quote to properly escape the book path for shell execution
-    command = f"{ebook_meta_bin_path} {shlex.quote(book_path)} --get-cover cover.jpg"
+    # Build secure command as list
+    command = [ebook_meta_bin_path, book_path, "--get-cover", "cover.jpg"]
 
-    # Run the command and capture the result
-    result = run_shell_command(command)
+    # Run the command securely using our centralized function
+    allowed_ebook_commands = ['ebook-meta']
+    result = run_shell_command_secure(command, allowed_ebook_commands)
+    
+    if not result:
+        raise RuntimeError("Failed to extract metadata")
 
     metadata = {}
     # Parse the command output to extract metadata
@@ -68,6 +108,10 @@ def get_audio_duration_using_ffprobe(file_path):
     Returns:
         int: The duration of the audio file in milliseconds.
     """
+    # Validate file path
+    if not validate_file_path(file_path):
+        raise ValueError(f"Invalid or unsafe file path: {file_path}")
+        
     # Construct the command to execute
     cmd = [
         "ffprobe",  # Use ffprobe to get the duration
@@ -78,17 +122,33 @@ def get_audio_duration_using_ffprobe(file_path):
         "default=noprint_wrappers=1:nokey=1",  # Print the duration without any additional information
         file_path  # Specify the file to analyze
     ]
-    # Run the command and capture the output
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    # Run the command securely
+    allowed_commands = ['ffprobe']
+    result = run_shell_command_secure(cmd, allowed_commands)
+    
+    if not result or result.returncode != 0:
+        raise RuntimeError(f"Failed to get audio duration: {result.stderr if result else 'Unknown error'}")
+        
     # Convert the output to an integer (in milliseconds) and return it
     return int(float(result.stdout.strip()) * 1000)
 
 def get_audio_duration_using_raw_ffmpeg(file_path):
     """Returns the duration of an audio file using FFmpeg."""
+    # Validate file path
+    if not validate_file_path(file_path):
+        raise ValueError(f"Invalid or unsafe file path: {file_path}")
+        
     cmd = ["ffmpeg", "-y", "-i", file_path, "-f", "null", "-"]
     
     try:
-        result = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        # Run the command securely
+        allowed_commands = ['ffmpeg']
+        result = run_shell_command_secure(cmd, allowed_commands)
+        
+        if not result:
+            return None
+            
         stderr_output = result.stderr
 
         # Look for the final timestamp (time=xx:xx:xx.xx) in FFmpeg output
@@ -132,10 +192,22 @@ def generate_chapters_file(chapter_files, output_file="chapters.txt"):
             start_time = end_time
 
 def create_m4a_file_from_raw_aac_file(input_file_path, output_file_path):
+    # Validate file paths
+    if not validate_file_path(input_file_path):
+        raise ValueError(f"Invalid input file path: {input_file_path}")
+        
     cmd = ["ffmpeg", "-y", "-i", input_file_path, "-c", "copy", output_file_path]
     
     try:
-        result = subprocess.run(cmd)
+        # Run the command securely
+        allowed_commands = ['ffmpeg']
+        result = run_shell_command_secure(cmd, allowed_commands)
+        
+        if not result or result.returncode != 0:
+            error_msg = result.stderr if result else "Unknown error"
+            print(f"Error creating M4A from AAC: {error_msg}")
+            return None
+            
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -146,6 +218,10 @@ def create_m4a_file_from_wav_file(input_file_path, output_file_path):
     Convert WAV to M4A using AAC encoding with intelligent quality settings.
     Preserves sample rate and channel layout from input file.
     """
+    # Validate file paths
+    if not validate_file_path(input_file_path):
+        raise ValueError(f"Invalid input file path: {input_file_path}")
+        
     # Get properties of input file to preserve them
     audio_props = get_audio_properties(input_file_path)
     sample_rate = audio_props["sample_rate"]
@@ -158,7 +234,15 @@ def create_m4a_file_from_wav_file(input_file_path, output_file_path):
     ]
     
     try:
-        result = subprocess.run(cmd)
+        # Run the command securely
+        allowed_commands = ['ffmpeg']
+        result = run_shell_command_secure(cmd, allowed_commands)
+        
+        if not result or result.returncode != 0:
+            error_msg = result.stderr if result else "Unknown error"
+            print(f"Error creating M4A from WAV: {error_msg}")
+            return None
+            
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -168,10 +252,22 @@ def create_aac_file_from_m4a_file(input_file_path, output_file_path):
     """
     Extract AAC stream from M4A container (lossless container change only).
     """
+    # Validate file paths
+    if not validate_file_path(input_file_path):
+        raise ValueError(f"Invalid input file path: {input_file_path}")
+        
     cmd = ["ffmpeg", "-y", "-i", input_file_path, "-c", "copy", output_file_path]
     
     try:
-        result = subprocess.run(cmd)
+        # Run the command securely
+        allowed_commands = ['ffmpeg']
+        result = run_shell_command_secure(cmd, allowed_commands)
+        
+        if not result or result.returncode != 0:
+            error_msg = result.stderr if result else "Unknown error"
+            print(f"Error creating AAC from M4A: {error_msg}")
+            return None
+            
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -182,6 +278,10 @@ def create_mp3_file_from_m4a_file(input_file_path, output_file_path):
     Convert M4A to MP3 preserving original sample rate and quality.
     Uses high-quality LAME encoder settings.
     """
+    # Validate file paths
+    if not validate_file_path(input_file_path):
+        raise ValueError(f"Invalid input file path: {input_file_path}")
+        
     # Get properties of input file
     audio_props = get_audio_properties(input_file_path)
     sample_rate = audio_props["sample_rate"]
@@ -198,7 +298,15 @@ def create_mp3_file_from_m4a_file(input_file_path, output_file_path):
     ]
     
     try:
-        result = subprocess.run(cmd)
+        # Run the command securely
+        allowed_commands = ['ffmpeg']
+        result = run_shell_command_secure(cmd, allowed_commands)
+        
+        if not result or result.returncode != 0:
+            error_msg = result.stderr if result else "Unknown error"
+            print(f"Error creating MP3 from M4A: {error_msg}")
+            return None
+            
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -209,6 +317,10 @@ def create_wav_file_from_m4a_file(input_file_path, output_file_path):
     Convert M4A to WAV preserving original sample rate and channel layout.
     This is a lossless conversion that maintains audio quality.
     """
+    # Validate file paths
+    if not validate_file_path(input_file_path):
+        raise ValueError(f"Invalid input file path: {input_file_path}")
+        
     # Get properties of input file to preserve them
     audio_props = get_audio_properties(input_file_path)
     sample_rate = audio_props["sample_rate"]
@@ -222,7 +334,15 @@ def create_wav_file_from_m4a_file(input_file_path, output_file_path):
     ]
     
     try:
-        result = subprocess.run(cmd)
+        # Run the command securely
+        allowed_commands = ['ffmpeg']
+        result = run_shell_command_secure(cmd, allowed_commands)
+        
+        if not result or result.returncode != 0:
+            error_msg = result.stderr if result else "Unknown error"
+            print(f"Error creating WAV from M4A: {error_msg}")
+            return None
+            
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -233,6 +353,10 @@ def create_opus_file_from_m4a_file(input_file_path, output_file_path):
     Convert M4A to Opus with intelligent quality settings.
     Opus only supports specific sample rates, so we map to the closest supported rate.
     """
+    # Validate file paths
+    if not validate_file_path(input_file_path):
+        raise ValueError(f"Invalid input file path: {input_file_path}")
+        
     # Get properties of input file
     audio_props = get_audio_properties(input_file_path)
     original_sample_rate = audio_props["sample_rate"]
@@ -263,7 +387,15 @@ def create_opus_file_from_m4a_file(input_file_path, output_file_path):
     ]
     
     try:
-        result = subprocess.run(cmd)
+        # Run the command securely
+        allowed_commands = ['ffmpeg']
+        result = run_shell_command_secure(cmd, allowed_commands)
+        
+        if not result or result.returncode != 0:
+            error_msg = result.stderr if result else "Unknown error"
+            print(f"Error creating Opus from M4A: {error_msg}")
+            return None
+            
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -274,6 +406,10 @@ def create_flac_file_from_m4a_file(input_file_path, output_file_path):
     Convert M4A to FLAC (lossless compression).
     Preserves all original audio properties for maximum quality.
     """
+    # Validate file paths
+    if not validate_file_path(input_file_path):
+        raise ValueError(f"Invalid input file path: {input_file_path}")
+        
     # Get properties of input file to preserve them
     audio_props = get_audio_properties(input_file_path)
     sample_rate = audio_props["sample_rate"]
@@ -287,7 +423,15 @@ def create_flac_file_from_m4a_file(input_file_path, output_file_path):
     ]
     
     try:
-        result = subprocess.run(cmd)
+        # Run the command securely
+        allowed_commands = ['ffmpeg']
+        result = run_shell_command_secure(cmd, allowed_commands)
+        
+        if not result or result.returncode != 0:
+            error_msg = result.stderr if result else "Unknown error"
+            print(f"Error creating FLAC from M4A: {error_msg}")
+            return None
+            
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -298,6 +442,10 @@ def create_pcm_file_from_m4a_file(input_file_path, output_file_path):
     Convert M4A to raw PCM preserving original audio properties.
     This creates uncompressed audio data with maximum quality.
     """
+    # Validate file paths
+    if not validate_file_path(input_file_path):
+        raise ValueError(f"Invalid input file path: {input_file_path}")
+        
     # Get properties of input file to preserve them
     audio_props = get_audio_properties(input_file_path)
     sample_rate = audio_props["sample_rate"]
@@ -313,7 +461,15 @@ def create_pcm_file_from_m4a_file(input_file_path, output_file_path):
     ]
     
     try:
-        result = subprocess.run(cmd)
+        # Run the command securely
+        allowed_commands = ['ffmpeg']
+        result = run_shell_command_secure(cmd, allowed_commands)
+        
+        if not result or result.returncode != 0:
+            error_msg = result.stderr if result else "Unknown error"
+            print(f"Error creating PCM from M4A: {error_msg}")
+            return None
+            
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -353,11 +509,19 @@ def merge_chapters_to_m4b(book_path, chapter_files):
         book_path (str): The path to the book file.
         chapter_files (list): A list of the paths to the individual chapter audio files.
     """
+    # Validate inputs
+    if not validate_file_path(book_path):
+        raise ValueError(f"Invalid or unsafe book path: {book_path}")
+        
     file_list_path = "chapter_list.txt"
     
     with open(file_list_path, "w", encoding='utf-8') as f:
         for chapter in chapter_files:
-            f.write(f"file '{os.path.join('temp_audio', chapter)}'\n")
+            # Validate each chapter file path
+            chapter_path = os.path.join('temp_audio', chapter)
+            if not validate_file_path(chapter_path):
+                raise ValueError(f"Invalid chapter file: {chapter}")
+            f.write(f"file '{chapter_path}'\n")
 
     metadata = get_ebook_metadata_with_cover(book_path)
     title = escape_metadata(metadata.get("Title", ""))
@@ -373,24 +537,51 @@ def merge_chapters_to_m4b(book_path, chapter_files):
     output_m4b = "generated_audiobooks/audiobook.m4b"
     cover_image = "cover.jpg"
 
-    # Construct metadata arguments safely
-    metadata = (
-        f"-metadata title=\"{title}\" "
-        f"-metadata artist=\"{authors}\" "
-        f"-metadata album=\"{title}\" "
-        f"-metadata genre=\"Audiobook\" "
-        f"-metadata publisher=\"{publisher}\" "
-        f"-metadata language=\"{languages}\" "
-        f"-metadata date=\"{published_date}\" "
-        f"-metadata description=\"{comments}\""
-    )
+    # Validate required files exist
+    for required_file in [file_list_path, cover_image, "chapters.txt"]:
+        if not validate_file_path(required_file):
+            raise ValueError(f"Required file missing or invalid: {required_file}")
+
+    # Build secure FFmpeg command as list
+    ffmpeg_cmd = [
+        "ffmpeg", "-y", 
+        "-f", "concat", "-safe", "0", "-i", file_list_path,
+        "-i", cover_image, 
+        "-i", "chapters.txt",
+        "-c", "copy", 
+        "-map", "0", 
+        "-map", "1", 
+        "-disposition:v:0", "attached_pic", 
+        "-map_metadata", "2"
+    ]
     
-    ffmpeg_cmd = (
-        f"ffmpeg -y -f concat -safe 0 -i {file_list_path} -i {cover_image} -i chapters.txt "
-        f"-c copy -map 0 -map 1 -disposition:v:0 attached_pic -map_metadata 2 {metadata} {output_m4b}"
-    )
+    # Add metadata safely
+    if title:
+        ffmpeg_cmd.extend(["-metadata", f"title={title}"])
+    if authors:
+        ffmpeg_cmd.extend(["-metadata", f"artist={authors}"])
+    if title:
+        ffmpeg_cmd.extend(["-metadata", f"album={title}"])
+    ffmpeg_cmd.extend(["-metadata", "genre=Audiobook"])
+    if publisher:
+        ffmpeg_cmd.extend(["-metadata", f"publisher={publisher}"])
+    if languages:
+        ffmpeg_cmd.extend(["-metadata", f"language={languages}"])
+    if published_date:
+        ffmpeg_cmd.extend(["-metadata", f"date={published_date}"])
+    if comments:
+        ffmpeg_cmd.extend(["-metadata", f"description={comments}"])
+        
+    ffmpeg_cmd.append(output_m4b)
     
-    subprocess.run(ffmpeg_cmd, shell=True, check=True)
+    # Use centralized secure command execution
+    allowed_ffmpeg_commands = ['ffmpeg']
+    result = run_shell_command_secure(ffmpeg_cmd, allowed_ffmpeg_commands)
+    
+    if not result or result.returncode != 0:
+        error_msg = result.stderr if result else "Unknown error"
+        raise RuntimeError(f"FFmpeg failed: {error_msg}")
+        
     print(f"Audiobook created: {output_m4b}")
 
 def add_silence_to_audio_file_by_appending_pre_generated_silence(temp_dir, input_file_name):
@@ -408,24 +599,61 @@ def add_silence_to_audio_file_by_reencoding_using_ffmpeg(temp_dir, input_file_na
         input_file_name (str): The name of the file to add silence to.
         pause_duration (str): The duration of the silence (e.g. 00:00:05).
     """
-    # Generate a silence file with the specified duration
-    # Use shlex.quote to properly escape paths for shell execution
-    generate_silence_command = f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=mono -t {pause_duration} -c:a aac {shlex.quote(os.path.join(temp_dir, "silence.aac"))}'
-    subprocess.run(generate_silence_command, shell=True, check=True)
+    # Validate inputs
+    if not validate_file_path(temp_dir) or not input_file_name:
+        raise ValueError("Invalid temporary directory or file name")
+        
+    # Validate pause_duration format (basic check)
+    if not re.match(r'^\d{2}:\d{2}:\d{2}$', pause_duration):
+        raise ValueError("Invalid pause duration format. Expected HH:MM:SS")
+    
+    silence_path = os.path.join(temp_dir, "silence.aac")
+    input_path = os.path.join(temp_dir, input_file_name)
+    
+    # Validate file paths
+    if not validate_file_path(input_path):
+        raise ValueError(f"Invalid input file path: {input_path}")
+    
+    # Generate a silence file with the specified duration - secure command
+    generate_silence_command = [
+        "ffmpeg", "-y", 
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", 
+        "-t", pause_duration, 
+        "-c:a", "aac", 
+        silence_path
+    ]
+    
+    # Use centralized secure command execution
+    allowed_ffmpeg_commands = ['ffmpeg']
+    result = run_shell_command_secure(generate_silence_command, allowed_ffmpeg_commands)
+    
+    if not result or result.returncode != 0:
+        error_msg = result.stderr if result else "Unknown error"
+        raise RuntimeError(f"Failed to generate silence: {error_msg}")
 
-    # Add the silence to the end of the audio file
-    # Use shlex.quote to properly escape paths for shell execution
-    temp_audio_path = shlex.quote(os.path.join(temp_dir, input_file_name))
-    temp_silence_path = shlex.quote(os.path.join(temp_dir, "silence.aac"))
-    temp_output_path = shlex.quote(os.path.join(temp_dir, "temp_audio_file.aac"))
-    add_silence_command = f'ffmpeg -y -i {temp_audio_path} -i {temp_silence_path} -filter_complex "[0:a][1:a]concat=n=2:v=0:a=1[out]" -map "[out]" {temp_output_path}'
-    subprocess.run(add_silence_command, shell=True, check=True)
+    # Add the silence to the end of the audio file - secure command
+    temp_output_path = os.path.join(temp_dir, "temp_audio_file.aac")
+    add_silence_command = [
+        "ffmpeg", "-y", 
+        "-i", input_path, 
+        "-i", silence_path, 
+        "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1[out]", 
+        "-map", "[out]", 
+        temp_output_path
+    ]
+    
+    # Use centralized secure command execution
+    result = run_shell_command_secure(add_silence_command, allowed_ffmpeg_commands)
+    
+    if not result or result.returncode != 0:
+        error_msg = result.stderr if result else "Unknown error"
+        raise RuntimeError(f"Failed to add silence: {error_msg}")
 
     # Rename the temporary file back to the original file name
-    # Use shlex.quote to properly escape paths for shell execution
-    final_audio_path = shlex.quote(os.path.join(temp_dir, input_file_name))
-    rename_file_command = f'mv {temp_output_path} {final_audio_path}'
-    subprocess.run(rename_file_command, shell=True, check=True)
+    try:
+        os.replace(temp_output_path, input_path)
+    except OSError as e:
+        raise RuntimeError(f"Failed to rename file: {e}")
 
 def merge_chapters_to_standard_audio_file(chapter_files):
     """
@@ -441,20 +669,36 @@ def merge_chapters_to_standard_audio_file(chapter_files):
     # Write the list of chapter files to a text file (ffmpeg input)
     with open(file_list_path, "w", encoding='utf-8') as f:
         for chapter in chapter_files:
-            f.write(f"file '{os.path.join('temp_audio', chapter)}'\n")
+            chapter_path = os.path.join('temp_audio', chapter)
+            # Validate each chapter file
+            if not validate_file_path(chapter_path):
+                raise ValueError(f"Invalid chapter file: {chapter}")
+            f.write(f"file '{chapter_path}'\n")
 
     # Construct the output file path
-    output_file = f"generated_audiobooks/audiobook.m4a"
+    output_file = "generated_audiobooks/audiobook.m4a"
 
-    # Construct the ffmpeg command
-    ffmpeg_cmd = (
-        f"ffmpeg -y -f concat -safe 0 -i {file_list_path} -c copy {output_file}"
-    )
+    # Validate file list exists
+    if not validate_file_path(file_list_path):
+        raise ValueError("Chapter list file is invalid")
 
-    # Run the ffmpeg command
-    subprocess.run(ffmpeg_cmd, shell=True, check=True)
+    # Construct secure ffmpeg command
+    ffmpeg_cmd = [
+        "ffmpeg", "-y", 
+        "-f", "concat", "-safe", "0", 
+        "-i", file_list_path, 
+        "-c", "copy", 
+        output_file
+    ]
 
-    # Print a message when the generation is complete
+    # Use centralized secure command execution
+    allowed_ffmpeg_commands = ['ffmpeg']
+    result = run_shell_command_secure(ffmpeg_cmd, allowed_ffmpeg_commands)
+    
+    if not result or result.returncode != 0:
+        error_msg = result.stderr if result else "Unknown error"
+        raise RuntimeError(f"FFmpeg failed: {error_msg}")
+        
     print(f"Audiobook created: {output_file}")
 
 def assemble_chapter_with_ffmpeg(chapter_file, line_indices, temp_line_audio_dir, temp_audio_dir):
@@ -493,7 +737,13 @@ def assemble_chapter_with_ffmpeg(chapter_file, line_indices, temp_line_audio_dir
             "-i", file_list_path, "-c", "copy", chapter_path
         ]
         
-        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, check=True)
+        # Use centralized secure command execution
+        allowed_commands = ['ffmpeg']
+        result = run_shell_command_secure(ffmpeg_cmd, allowed_commands)
+        
+        if not result or result.returncode != 0:
+            error_msg = result.stderr if result else "Unknown error"
+            raise RuntimeError(f"FFmpeg chapter assembly failed: {error_msg}")
         
     finally:
         # Clean up the temporary file list
@@ -517,8 +767,16 @@ def get_audio_properties(file_path):
             - channel_layout (str): Channel layout ("mono" or "stereo")
             - duration (float): Duration in seconds (bonus info)
     """
-    import subprocess
-    import json
+    # Validate file path
+    if not validate_file_path(file_path):
+        # Return fallback values for invalid paths instead of raising exception
+        # since this function is often used as a helper
+        return {
+            "sample_rate": 44100,
+            "channels": 1,
+            "channel_layout": "mono",
+            "duration": 0.0
+        }
     
     # Get audio properties of the file
     probe_cmd = [
@@ -527,7 +785,13 @@ def get_audio_properties(file_path):
     ]
     
     try:
-        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+        # Use centralized secure command execution
+        allowed_commands = ['ffprobe']
+        probe_result = run_shell_command_secure(probe_cmd, allowed_commands)
+        
+        if not probe_result or probe_result.returncode != 0:
+            raise ValueError("ffprobe failed")
+            
         probe_data = json.loads(probe_result.stdout)
         
         # Extract audio stream properties
@@ -555,7 +819,7 @@ def get_audio_properties(file_path):
                 "duration": 0.0
             }
             
-    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError):
+    except (ValueError, json.JSONDecodeError, KeyError):
         # Fallback to common values if probe fails
         return {
             "sample_rate": 44100,
@@ -575,6 +839,10 @@ def add_silence_to_chapter_with_ffmpeg(chapter_path, silence_duration_ms=1000):
         chapter_path (str): Path to the chapter audio file
         silence_duration_ms (int): Duration of silence to add in milliseconds (default: 1000ms = 1 second)
     """
+    # Validate chapter path
+    if not validate_file_path(chapter_path):
+        raise ValueError(f"Invalid chapter path: {chapter_path}")
+        
     # Get audio properties of the chapter file
     audio_props = get_audio_properties(chapter_path)
     sample_rate = audio_props["sample_rate"]
@@ -608,16 +876,22 @@ def add_silence_to_chapter_with_ffmpeg(chapter_path, silence_duration_ms=1000):
             temp_output_path
         ]
         
-        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, check=True)
+        # Use centralized secure command execution
+        allowed_commands = ['ffmpeg']
+        result = run_shell_command_secure(ffmpeg_cmd, allowed_commands)
+        
+        if not result or result.returncode != 0:
+            error_msg = result.stderr if result else "Unknown error"
+            raise RuntimeError(f"FFmpeg silence addition failed: {error_msg}")
         
         # Replace the original file with the new one
         os.replace(temp_output_path, chapter_path)
         
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         # Clean up temp files if FFmpeg failed
         if os.path.exists(temp_output_path):
             os.unlink(temp_output_path)
-        print(f"FFmpeg error: {e.stderr}")
+        print(f"FFmpeg error: {e}")
         raise e
     finally:
         # Clean up concat list file
@@ -655,9 +929,15 @@ def generate_silence_file(output_path, duration_ms=1000, sample_rate=44100, chan
     ]
     
     try:
-        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, check=True)
+        # Use centralized secure command execution
+        allowed_commands = ['ffmpeg']
+        result = run_shell_command_secure(ffmpeg_cmd, allowed_commands)
+        
+        if not result or result.returncode != 0:
+            error_msg = result.stderr if result else "Unknown error"
+            raise RuntimeError(f"Failed to generate silence file: {error_msg}")
+            
         print(f"Generated silence file: {output_path} ({duration_ms}ms, {sample_rate}Hz, {channel_layout})")
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         print(f"Error generating silence file: {e}")
-        print(f"FFmpeg stderr: {e.stderr}")
         raise e

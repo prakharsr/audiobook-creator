@@ -22,7 +22,7 @@ import traceback
 from fastapi import FastAPI
 from book_to_txt import process_book_and_extract_text, save_book
 from identify_characters_and_output_book_to_jsonl import process_book_and_identify_characters
-from generate_audiobook import process_audiobook_generation
+from generate_audiobook import process_audiobook_generation, validate_book_for_m4b_generation
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -59,6 +59,12 @@ def text_extraction_wrapper(book_file, text_decoding_option, book_title):
         # Final yield with success notification
         yield last_output
         return gr.Info("Text extracted successfully! You can now edit the content.", duration=5)
+    except ValueError as e:
+        # Handle validation errors specifically
+        print(e)
+        traceback.print_exc()
+        yield None
+        return gr.Warning(f"Book validation error: {str(e)}")
     except Exception as e:
         print(e)
         traceback.print_exc()
@@ -120,6 +126,18 @@ async def generate_audiobook_wrapper(voice_type, narrator_gender, output_format,
         yield gr.Warning("Please select voice type and output format."), None
         yield None, None
         return
+    
+    # Early validation for M4B format
+    if output_format == "M4B (Chapters & Cover)":
+        yield gr.Info("Validating book file for M4B audiobook generation..."), None
+        is_valid, error_message, metadata = validate_book_for_m4b_generation(book_file)
+        
+        if not is_valid:
+            yield gr.Warning(f"❌ Book validation failed: {error_message}"), None
+            yield None, None
+            return
+            
+        yield gr.Info(f"✅ Book validation successful! Title: {metadata.get('Title', 'Unknown')}, Author: {metadata.get('Author(s)', 'Unknown')}"), None
     
     # Get current TTS engine from environment
     current_tts_engine = os.environ.get("TTS_MODEL", "kokoro").lower()
