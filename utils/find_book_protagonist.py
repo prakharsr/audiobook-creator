@@ -22,7 +22,7 @@ from bs4 import BeautifulSoup
 import traceback
 from openai import OpenAI, AsyncOpenAI
 
-from utils.llm_utils import check_if_have_to_include_no_think_token
+from utils.llm_utils import check_if_have_to_include_no_think_token, clean_thinking_tags
 
 async def find_book_protagonist_using_search_engine_and_llm(book_title, async_openai_client: AsyncOpenAI, model_name, search_method='google'):
     """
@@ -221,8 +221,10 @@ async def find_book_protagonist_using_search_engine_and_llm(book_title, async_op
             )
             
             # Extract and return the protagonist information
-            protagonist_info = response.choices[0].message.content.strip()
-            return protagonist_info.lower()
+            raw_protagonist_info = response.choices[0].message.content.strip()
+            cleaned_protagonist_info = clean_thinking_tags(raw_protagonist_info)
+
+            return cleaned_protagonist_info.lower()
         else:
             return "No search results found for this book."
             

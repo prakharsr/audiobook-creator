@@ -23,7 +23,7 @@ import traceback
 from tqdm.asyncio import tqdm_asyncio # Use tqdm's async version for better updates
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
-from utils.llm_utils import check_if_have_to_include_no_think_token
+from utils.llm_utils import check_if_have_to_include_no_think_token, clean_thinking_tags
 
 load_dotenv()
 
@@ -501,9 +501,10 @@ Return *only* the modified text segment with any needed emotion tags. Do not inc
             temperature=0.2, # Set temperature
         )
         enhanced_text = response.choices[0].message.content.strip()
+        cleaned_content = clean_thinking_tags(enhanced_text)
 
         # Apply comprehensive postprocessing validation
-        validation_result = postprocess_emotion_tags(enhanced_text, text_segment)
+        validation_result = postprocess_emotion_tags(cleaned_content, text_segment)
         return validation_result
     except Exception as e:
         print(f"Error querying LLM for segment: '{text_segment[:50]}...': {e}")

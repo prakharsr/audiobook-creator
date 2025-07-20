@@ -21,6 +21,7 @@ import sys
 import time
 import textract
 import traceback
+import shlex
 from utils.run_shell_commands import run_shell_command, check_if_calibre_is_installed
 
 def extract_text_from_book_using_textract(book_path):
@@ -42,7 +43,8 @@ def extract_text_from_book_using_calibre(book_path):
     ebook_convert_bin_path = ebook_convert_bin_result.stdout.strip()
 
     # Command to convert the book into a plain text file using ebook-convert
-    command = f"{ebook_convert_bin_path} '{book_path}' extracted_book.txt"
+    # Use shlex.quote to properly escape the book path for shell execution
+    command = f"{ebook_convert_bin_path} {shlex.quote(book_path)} extracted_book.txt"
     
     # Execute the command without using a virtual environment
     result = run_shell_command(command)
@@ -54,37 +56,73 @@ def extract_text_from_book_using_calibre(book_path):
     return book_text
 
 def fix_unterminated_quotes(text: str):
-    """Fixes unterminated quotes in the given text."""
-    lines = text.splitlines()  # Split the text into lines
-    fixed_text = []
-    in_quote = False  # Track if we're inside a quote
-
+    """
+    Fixes genuinely unterminated quotes in dialogue.
+    
+    This function is conservative and only fixes quotes when there's a clear
+    imbalance in quote counts within dialogue paragraphs. It does NOT add
+    quotes at the beginning of lines arbitrarily.
+    
+    Args:
+        text (str): The input text to process
+        
+    Returns:
+        str: Text with fixed quotes
+    """
+    lines = text.splitlines()
+    fixed_lines = []
+    
     for line in lines:
-        quote_indices = [i for i, char in enumerate(line) if char == '"']  # Find all quote positions
-        if not quote_indices:
-            fixed_text.append(line)  # No quotes in this line, add as is
+        if not line.strip():
+            # Empty line, add as-is
+            fixed_lines.append(line)
             continue
-
-        # Process quotes in the line
-        new_line = ""
-        for i, char in enumerate(line):
-            if char == '"':
-                in_quote = not in_quote  # Toggle quote state
-            new_line += char
-
-        # If the line ends with an unterminated quote, add a closing quote
-        if in_quote and not line.endswith('"'):
-            new_line += '"'
-            in_quote = False  # Reset quote state
-
-        # If the line ends with an unterminated quote, add a closing quote
-        if in_quote and not new_line.startswith('"'):
-            new_line = '"' + new_line
-            in_quote = False  # Reset quote state
-
-        fixed_text.append(new_line)
-
-    return "\n".join(fixed_text)  # Join lines back into a single string
+            
+        # Count quotes in this line
+        quote_count = line.count('"')
+        
+        # Only process lines that likely contain dialogue and have odd number of quotes
+        if quote_count > 0 and quote_count % 2 == 1:
+            # Check if this looks like dialogue (starts with quote or has attribution)
+            stripped = line.strip()
+            
+            # Case 1: Line starts with quote but doesn't end with one
+            # Example: "Hello there, how are you?
+            if stripped.startswith('"') and not stripped.endswith('"'):
+                # Check if this is likely incomplete dialogue
+                # Look for sentence endings that should have closing quotes
+                if any(stripped.endswith(punct) for punct in ['.', '!', '?', ',']):
+                    line = line + '"'
+                    
+            # Case 2: Line has dialogue attribution but missing opening quote
+            # Example: She said, Hello there!"
+            elif stripped.endswith('"') and not stripped.startswith('"'):
+                # Look for common dialogue attribution patterns
+                attribution_patterns = [
+                    r'\b(said|asked|replied|answered|shouted|whispered|muttered|declared)\b.*"',
+                    r'\b(he|she|they|I)\s+(said|asked|replied|answered|shouted|whispered|muttered|declared)\b.*"',
+                ]
+                
+                for pattern in attribution_patterns:
+                    if re.search(pattern, stripped, re.IGNORECASE):
+                        # Find where the actual quote content starts (after attribution)
+                        # Look for the attribution and add quote after it
+                        match = re.search(r'\b(said|asked|replied|answered|shouted|whispered|muttered|declared)\b\s*', stripped, re.IGNORECASE)
+                        if match:
+                            insert_pos = match.end()
+                            line = stripped[:insert_pos] + '"' + stripped[insert_pos:]
+                        break
+                        
+            # Case 3: Line has quote in middle but unbalanced
+            # Be very conservative here - only fix obvious cases
+            elif quote_count == 1 and any(word in stripped.lower() for word in ['said', 'asked', 'replied', 'shouted', 'whispered']):
+                # This might be dialogue with attribution, but be cautious
+                # Only fix if we can clearly identify the pattern
+                pass  # For now, leave these alone to avoid errors
+                
+        fixed_lines.append(line)
+    
+    return "\n".join(fixed_lines)
 
 def extract_main_content(text, start_marker="PROLOGUE", end_marker="ABOUT THE AUTHOR"):
     """
@@ -196,7 +234,31 @@ def process_book_and_extract_text(
     else:
         text: str = extract_text_from_book_using_textract(book_path)
 
-    text = text.replace("\u201c", '"').replace("\u201d", '"').replace("\u2019", "'").replace("\u2018", "'")
+    # Replace various Unicode characters with ASCII equivalents
+    text = (text.replace("\u201c", '"')      # Left double quotation mark
+                .replace("\u201d", '"')      # Right double quotation mark
+                .replace("\u2018", "'")      # Left single quotation mark
+                .replace("\u2019", "'")      # Right single quotation mark
+                .replace("\u2014", "-")      # Em dash
+                .replace("\u2013", "-")      # En dash
+                .replace("\u2026", "...")    # Horizontal ellipsis
+                .replace("\u00a0", " ")      # Non-breaking space
+                .replace("\u2010", "-")      # Hyphen
+                .replace("\u2011", "-")      # Non-breaking hyphen
+                .replace("\u2012", "-")      # Figure dash
+                .replace("\u2015", "-")      # Horizontal bar
+                .replace("\u00ab", '"')      # Left-pointing double angle quotation mark
+                .replace("\u00bb", '"')      # Right-pointing double angle quotation mark
+                .replace("\u2039", "'")      # Single left-pointing angle quotation mark
+                .replace("\u203a", "'")      # Single right-pointing angle quotation mark
+                .replace("\u201e", '"')      # Double low-9 quotation mark
+                .replace("\u201a", "'")      # Single low-9 quotation mark
+                .replace("\u2032", "'")      # Prime
+                .replace("\u2033", '"')      # Double prime
+                .replace("\ufeff", "")       # Byte order mark
+                .replace("\u00ad", "")       # Soft hyphen
+    )
+    
     text = normalize_line_breaks(text)
     text = fix_unterminated_quotes(text)
 

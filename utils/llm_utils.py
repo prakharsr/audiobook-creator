@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 import random
 import asyncio
 from openai import AsyncOpenAI
+import re
 
 load_dotenv()
 
@@ -31,6 +32,30 @@ NO_THINK_MODE = os.environ.get("NO_THINK_MODE", "true")
 MAX_RETRIES = 3
 BASE_DELAY = 1.0  # Base delay in seconds
 MAX_DELAY = 60.0  # Maximum delay in seconds
+
+def clean_thinking_tags(response_text):
+    """
+    Remove <think> XML tags and their content from LLM responses.
+    
+    Args:
+        response_text (str): The raw response from the LLM
+        
+    Returns:
+        str: The cleaned response with thinking tags removed
+    """
+    if not response_text:
+        return response_text
+    
+    # Remove <think>...</think> blocks (including multiline)
+    cleaned = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL)
+    
+    # Remove any remaining standalone thinking tags
+    cleaned = re.sub(r'</?think>', '', cleaned)
+    
+    # Clean up extra whitespace and newlines
+    cleaned = cleaned.strip()
+    
+    return cleaned
 
 def check_if_have_to_include_no_think_token():
     if NO_THINK_MODE == True or NO_THINK_MODE == "true":
@@ -47,7 +72,10 @@ async def check_if_llm_is_up(async_openai_client, model_name):
             ]
         )
         
-        return True, response.choices[0].message.content.strip()
+        # Clean the response from thinking tags
+        raw_content = response.choices[0].message.content.strip()
+        cleaned_content = clean_thinking_tags(raw_content)
+        return True, cleaned_content
     except Exception as e:
         traceback.print_exc()
         return False, "Your configured LLM is not working. Please check if the .env file is correctly set up. Error: " + str(e)

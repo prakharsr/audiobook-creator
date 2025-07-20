@@ -30,7 +30,7 @@ from gliner import GLiNER
 import warnings
 from utils.file_utils import write_jsons_to_jsonl_file, empty_file, write_json_to_file
 from utils.find_book_protagonist import find_book_protagonist
-from utils.llm_utils import check_if_have_to_include_no_think_token, check_if_llm_is_up
+from utils.llm_utils import check_if_have_to_include_no_think_token, check_if_llm_is_up, clean_thinking_tags
 from dotenv import load_dotenv
 from huggingface_hub import snapshot_download
 
@@ -237,8 +237,9 @@ async def identify_character_gender_and_age_using_llm_and_assign_score(character
         )
 
         # Extract and clean the LLM's response
-        age_and_gender = response.choices[0].message.content
-        age_and_gender = age_and_gender.lower().strip()
+        raw_response = response.choices[0].message.content
+        cleaned_response = clean_thinking_tags(raw_response)
+        age_and_gender = cleaned_response.lower().strip()
         split_text = age_and_gender.split("\n")
         age_text = split_text[0]
         gender_text = split_text[1]
