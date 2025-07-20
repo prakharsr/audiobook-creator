@@ -53,6 +53,9 @@ def preprocess_text_for_tts(text):
             
         # Handle colon conflicts for Orpheus TTS voice formatting
         line = _resolve_colon_conflicts(line)
+        
+        # Move punctuation from outside quotes to inside quotes for TTS compatibility
+        line = _move_punctuation_inside_quotes(line)
             
         # Check if line ends with dialogue that has internal punctuation
         # This must come BEFORE general punctuation check
@@ -60,8 +63,14 @@ def preprocess_text_for_tts(text):
             processed_lines.append(line)
             continue
             
+        # Check for dialogue that lacks internal punctuation and add it inside
+        if _is_unpunctuated_dialogue(line):
+            line = _add_punctuation_inside_dialogue(line)
+            processed_lines.append(line)
+            continue
+            
         # Check if line already ends with proper punctuation
-        if line.endswith(('.', '!', '?', ':', ';')):
+        if line.endswith(('.', '!', '?', ':', ';', '…')):
             processed_lines.append(line)
             continue
             
@@ -116,11 +125,21 @@ def _is_title_or_heading(line, line_index, total_lines):
 
 def _ends_with_punctuated_dialogue(line):
     """Check if line ends with dialogue that already has proper punctuation."""
-    # Look for patterns like: "Hello!" or "What?" or "Yes."
+    # Look for patterns like: "Hello!" or "What?" or "Yes." or "Oh…"
     # This covers dialogue that ends the sentence
     # Also handles nested quotes like: "He said, 'Hello.'"
-    dialogue_pattern = r'[.!?][\'"]?"$'
-    if re.search(dialogue_pattern, line):
+    # Updated to include ellipsis and handle optional spaces between punctuation and quotes
+    
+    # Pattern 1: Punctuation inside quotes, optionally followed by quotes
+    # Examples: "Hello!" or "What?" or "Yes." or "Oh…"
+    dialogue_pattern1 = r'[.!?…]\s*[\'"]?"$'
+    if re.search(dialogue_pattern1, line):
+        return True
+    
+    # Pattern 2: Quotes followed by punctuation
+    # Examples: "Is that all right". or "Tell them we don't want —".
+    dialogue_pattern2 = r'[\'"][.!?…]$'
+    if re.search(dialogue_pattern2, line):
         return True
         
     # Look for dialogue with attribution like: "Hello," she said.
@@ -132,55 +151,97 @@ def _ends_with_punctuated_dialogue(line):
     return False
 
 
-def _resolve_colon_conflicts(line):
-    """
-    Resolve colon conflicts for Orpheus TTS voice formatting.
+def _is_unpunctuated_dialogue(line):
+    """Check if a line is dialogue that lacks internal punctuation."""
+    # Look for lines that end with quotes but have no punctuation before the quotes
+    # Examples: "Hello" or "What are you doing" or "Stop right there"
     
-    Orpheus uses format: <|audio|>voice_name: text content<|eot_id|>
-    Colons in the text content can confuse the parser, so we replace them
-    with alternative punctuation in common cases.
+    # Pattern: line ends with quote but no punctuation before the quote
+    # This catches: "Hello" but not "Hello!" or "Hello."
+    unpunctuated_dialogue_pattern = r'[^.!?…]["\']$'
+    if re.search(unpunctuated_dialogue_pattern, line):
+        return True
+        
+    return False
+
+
+def _add_punctuation_inside_dialogue(line):
+    """
+    Adds punctuation inside quotes for dialogue that lacks internal punctuation.
+    
+    Transforms patterns like:
+    - "Hello" → "Hello."
+    - "What are you doing" → "What are you doing."
+    - "Stop right there" → "Stop right there."
     
     Args:
         line (str): The line of text to process
         
     Returns:
-        str: The line with colon conflicts resolved
+        str: The line with punctuation added inside quotes
     """
-    # Handle chapter headings (most common case)
-    # "Chapter 1: The Beginning" -> "Chapter 1 - The Beginning"
-    chapter_pattern = r'^(Chapter|Part|PART)\s+(\d+|\w+):\s*(.+)$'
-    match = re.match(chapter_pattern, line, re.IGNORECASE)
-    if match:
-        prefix, number, title = match.groups()
-        return f"{prefix} {number} - {title}"
+    # Add period before closing quote if no punctuation exists
+    # Pattern: non-punctuation character followed by quote
+    line = re.sub(r'([^.!?…])(["\'])$', r'\1.\2', line)
     
-    # Handle time references (e.g., "3:30 AM" -> "3.30 AM")
+    return line
+
+
+def _resolve_colon_conflicts(line):
+    """
+    Resolve colon conflicts for Orpheus TTS voice formatting.
+    
+    Orpheus uses format: <|audio|>voice_name: text content<|eot_id|>
+    Colons in the text content can confuse the parser, so we simply remove all colons
+    and replace them with appropriate alternatives.
+    
+    Args:
+        line (str): The line of text to process
+        
+    Returns:
+        str: The line with all colons removed/replaced
+    """
+    # Simple approach: replace all colons with appropriate alternatives
+    
+    # Handle time references first (preserve as periods)
+    # "3:30 AM" -> "3.30 AM"
     time_pattern = r'\b(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?\b'
     line = re.sub(time_pattern, r'\1.\2 \3', line).strip()
     
-    # Handle ratios or scores (e.g., "5:3" -> "5 to 3")
+    # Handle ratios or scores 
+    # "5:3" -> "5 to 3"
     ratio_pattern = r'\b(\d+):(\d+)\b'
     line = re.sub(ratio_pattern, r'\1 to \2', line)
     
-    # Handle titles with colons, but preserve dialogue attribution and lists
-    # Check if it's dialogue attribution (character name followed by dialogue)
-    dialogue_attribution_pattern = r'^[A-Z][a-zA-Z\s]+\s+(said|asked|replied|whispered|shouted|exclaimed|muttered|declared|grinned|smiled|nodded|gasped|added|stepped|pulled|pointed|stopped|noticed|flipped|closed):\s*["\']'
-    if re.search(dialogue_attribution_pattern, line, re.IGNORECASE):
-        return line  # Preserve dialogue attribution format
+    # Replace all remaining colons with dashes
+    # This handles all other cases: dialogue attribution, lists, explanations, etc.
+    line = line.replace(':', ' -')
     
-    # Check if it's a list format (e.g., "He had three things: item1, item2, item3")
-    list_pattern = r':\s*[a-zA-Z].*,.*\.'
-    if re.search(list_pattern, line):
-        return line  # Preserve list format
+    # Clean up any double spaces that might have been created
+    line = re.sub(r'\s+', ' ', line).strip()
     
-    # Handle title-style colons (e.g., "Book Title: Subtitle" -> "Book Title - Subtitle")
-    title_colon_pattern = r'^([^:]{1,40}):\s*(.+)$'
-    match = re.match(title_colon_pattern, line)
-    if match and len(match.group(1).split()) <= 6:  # Likely a title if first part is short
-        prefix, suffix = match.groups()
-        # Only replace if it looks like a title, not a sentence
-        if not re.search(r'\b(said|asked|replied|whispered|shouted|exclaimed|had|was|were|have|has|included|contained)\b', prefix, re.IGNORECASE):
-            line = f"{prefix} - {suffix}"
+    return line
+
+
+def _move_punctuation_inside_quotes(line):
+    """
+    Moves punctuation from outside quotes to inside quotes for TTS compatibility.
+    
+    Transforms patterns like:
+    - "Hello". → "Hello."
+    - "What"? → "What?"
+    - "Stop"! → "Stop!"
+    - "Wait"… → "Wait…"
+    
+    Args:
+        line (str): The line of text to process
+        
+    Returns:
+        str: The line with punctuation moved inside quotes
+    """
+    # Move punctuation from outside quotes to inside quotes
+    # Pattern: quote followed by punctuation
+    line = re.sub(r'(["\'])([.!?…])', r'\2\1', line)
     
     return line
 

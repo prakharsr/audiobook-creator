@@ -63,6 +63,36 @@ def sanitize_filename(text):
     
     return text
 
+def is_only_punctuation(text):
+    """
+    Check if a line contains only punctuation marks without any actual words.
+    This helps avoid TTS errors when encountering lines with just punctuation.
+    
+    Args:
+        text (str): The text line to check
+        
+    Returns:
+        bool: True if the line contains only punctuation, False otherwise
+    """
+    # Remove all whitespace
+    cleaned_text = text.strip()
+    
+    # If empty after stripping, it's not useful for TTS
+    if not cleaned_text:
+        return True
+    
+    # Import string for standard punctuation
+    import string
+    
+    # Extended punctuation set including common Unicode punctuation in books
+    extended_punctuation = string.punctuation + '—–""''…‚„‹›«»‰‱'
+    
+    # Remove all punctuation marks (both ASCII and extended Unicode)
+    text_without_punct = ''.join(char for char in cleaned_text if char not in extended_punctuation)
+    
+    # If nothing remains after removing punctuation, it's only punctuation
+    return len(text_without_punct.strip()) == 0
+
 def split_and_annotate_text(text):
     """Splits text into dialogue and narration while annotating each segment."""
     parts = re.split(r'("[^"]+")', text)  # Keep dialogues in the split result
@@ -217,7 +247,7 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
     if TTS_MODEL.lower() == "orpheus":
         text = preprocess_text_for_tts(text)
         yield "Applied text preprocessing for Orpheus TTS"
-        
+
         # Add emotion tags if enabled for Orpheus
         if add_emotion_tags:
             yield "Adding emotion tags to enhance narration..."
@@ -270,7 +300,9 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
         async with semaphore:
             nonlocal progress_counter
 
-            if not line:
+            if not line or is_only_punctuation(line):
+                progress_bar.update(1)
+                progress_counter += 1
                 return None
                 
             # Split the line into annotated parts
@@ -282,7 +314,7 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
             for part in annotated_parts:
                 text_to_speak = part["text"].strip()
 
-                if not text_to_speak:
+                if not text_to_speak or is_only_punctuation(text_to_speak):
                     continue
 
                 voice_to_speak_in = narrator_voice if part["type"] == "narration" else dialogue_voice
@@ -553,10 +585,12 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
             nonlocal progress_counter
 
             line = doc["line"].strip()
-            if not line:
-                progress_bar.update(1)  # Update the progress bar even for empty lines
+
+            if not line or is_only_punctuation(line):
+                progress_bar.update(1)
+                progress_counter += 1
                 return None
-                
+
             speaker = doc["speaker"]
             speaker_voice = find_voice_for_gender_score(speaker, character_gender_map, TTS_MODEL, narrator_gender)
             
@@ -569,7 +603,7 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
             for part in annotated_parts:
                 text_to_speak = part["text"].strip()
 
-                if not text_to_speak:
+                if not text_to_speak or is_only_punctuation(text_to_speak):
                     continue
 
                 voice_to_speak_in = narrator_voice if part["type"] == "narration" else speaker_voice
