@@ -250,11 +250,17 @@ with gr.Blocks(css=css, theme=gr.themes.Default()) as gradio_app:
                 * Check for chapter breaks and paragraph formatting
                 """)
             
+            # Navigation buttons for the textbox
+            with gr.Row():
+                top_btn = gr.Button("↑ Go to Top", size="sm", variant="secondary")
+                bottom_btn = gr.Button("↓ Go to Bottom", size="sm", variant="secondary")
+            
             text_output = gr.Textbox(
                 label="Edit Book Content", 
                 placeholder="Extracted text will appear here for editing",
                 interactive=True, 
-                lines=15
+                lines=15,
+                elem_id="text_editor"
             )
             
             save_btn = gr.Button("Save Edited Text", variant="primary")
@@ -424,6 +430,35 @@ with gr.Blocks(css=css, theme=gr.themes.Default()) as gradio_app:
         lambda x: gr.update(visible=True) if x is not None else gr.update(visible=False),
         inputs=[audiobook_file],
         outputs=[download_box]
+    )
+    
+    # Navigation button functionality for textbox scrolling
+    top_btn.click(
+        None,
+        inputs=[],
+        outputs=[],
+        js="""
+        function() {
+            const textbox = document.querySelector('#text_editor textarea');
+            if (textbox) {
+                textbox.scrollTop = 0;
+            }
+        }
+        """
+    )
+    
+    bottom_btn.click(
+        None,
+        inputs=[],
+        outputs=[],
+        js="""
+        function() {
+            const textbox = document.querySelector('#text_editor textarea');
+            if (textbox) {
+                textbox.scrollTop = textbox.scrollHeight;
+            }
+        }
+        """
     )
 
 app = gr.mount_gradio_app(app, gradio_app, path="/")  # Mount Gradio at root
