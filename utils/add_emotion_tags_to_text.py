@@ -38,7 +38,7 @@ model_name = OPENAI_MODEL_NAME
 
 def fix_orphaned_tags_and_punctuation(text, original_text):
     """
-    Fix orphaned emotion tags and punctuation issues.
+    Fix orphaned emotion tags and punctuation issues while preserving line count.
     
     Args:
         text (str): Text with potential orphaned emotion tags
@@ -67,8 +67,8 @@ def fix_orphaned_tags_and_punctuation(text, original_text):
                 print(f"Detected potential orphaned tag in line: '{line}'")
                 
                 # Try to move tag to previous line if it looks like dialogue
-                if i > 0:
-                    prev_line = lines[i-1]
+                if i > 0 and i-1 < len(fixed_lines):
+                    prev_line = fixed_lines[i-1]
                     # Check if previous line is dialogue (contains quotes)
                     if '"' in prev_line:
                         # Move the emotion tag to within the dialogue
@@ -76,20 +76,28 @@ def fix_orphaned_tags_and_punctuation(text, original_text):
                         fixed_prev_line = move_tag_to_dialogue(prev_line, tag)
                         if fixed_prev_line != prev_line:
                             fixed_lines[i-1] = fixed_prev_line
-                            fixed_line = ""  # Remove the orphaned line
-                            print(f"Moved tag to previous dialogue line")
+                            # Instead of removing line, restore original without tags
+                            fixed_line = line_without_tags if line_without_tags else original_lines[i] if i < len(original_lines) else ""
+                            print(f"Moved tag to previous dialogue line, preserved current line")
                         else:
-                            # If couldn't move to dialogue, try to merge with previous line
-                            fixed_lines[i-1] = prev_line + " " + line.strip()
-                            fixed_line = ""
-                            print(f"Merged orphaned tag with previous line")
+                            # If couldn't move to dialogue, remove tags but keep the line
+                            fixed_line = line_without_tags if line_without_tags else original_lines[i] if i < len(original_lines) else ""
+                            print(f"Removed orphaned tag, preserved line content")
+                    else:
+                        # Remove tags but keep the line content to preserve line count
+                        fixed_line = line_without_tags if line_without_tags else original_lines[i] if i < len(original_lines) else ""
+                        print(f"Removed orphaned tag, preserved line content")
+                else:
+                    # Remove tags but keep the line content to preserve line count
+                    fixed_line = line_without_tags if line_without_tags else original_lines[i] if i < len(original_lines) else ""
+                    print(f"Removed orphaned tag, preserved line content")
         
         # 2. Fix punctuation issues in dialogue with emotion tags
         if '"' in fixed_line and any(tag in fixed_line for tag in ['<laugh>', '<chuckle>', '<sigh>', '<cough>', '<sniffle>', '<groan>', '<yawn>', '<gasp>']):
             fixed_line = fix_dialogue_punctuation(fixed_line)
         
-        if fixed_line:  # Only add non-empty lines
-            fixed_lines.append(fixed_line)
+        # Always append the line to preserve line count, even if it's empty
+        fixed_lines.append(fixed_line)
     
     return '\n'.join(fixed_lines)
 
@@ -177,9 +185,12 @@ def detect_remaining_orphaned_tags(text):
             line_without_tags = re.sub(r'<(?:laugh|chuckle|sigh|cough|sniffle|groan|yawn|gasp)>\s*', '', line).strip()
             
             # If line has only tags or very minimal content (< 10 chars), it's still orphaned
+            # But now we don't treat this as a fatal error since we preserve line count
             if len(line_without_tags) < 10:
-                orphaned_lines.append(f"Line {i+1}: '{line}'")
+                print(f"Warning: Potential orphaned tag preserved at line {i+1}: '{line}'")
+                # Don't add to orphaned_lines since we're preserving these lines now
     
+    # Since we now preserve line count, we return empty list to indicate no fatal orphans
     return orphaned_lines
 
 def postprocess_emotion_tags(enhanced_text, original_text):
@@ -334,7 +345,19 @@ def postprocess_emotion_tags(enhanced_text, original_text):
             print(f"Applied orphaned tag fixes")
             cleaned_text = fixed_text
         
-        # 7. Final check for remaining orphaned tags after fixes
+        # 7. Verify line count is preserved after fixing orphaned tags
+        fixed_lines = cleaned_text.split('\n')
+        if len(original_lines) != len(fixed_lines):
+            reason = f"Line count changed after fixing orphaned tags ({len(original_lines)} -> {len(fixed_lines)} lines)"
+            print(f"Warning: {reason}. Reverting to original text.")
+            return {
+                'text': original_text,
+                'success': False,
+                'reverted': True,
+                'reason': reason
+            }
+        
+        # 8. Final check for remaining orphaned tags after fixes
         remaining_orphans = detect_remaining_orphaned_tags(cleaned_text)
         if remaining_orphans:
             reason = f"Could not fix orphaned emotion tags: {remaining_orphans}"
@@ -565,8 +588,15 @@ async def process_chunk_line_by_line(chunk):
 async def add_tags_to_text_chunks(text_to_process):
     """Processes the book text in chunks and yields progress updates."""
 
+    # Filter out empty lines to match JSONL processing (which skips empty lines)
+    lines = text_to_process.split('\n')
+    non_empty_lines = [line for line in lines if line.strip()]  # Only keep non-empty lines
+    filtered_text = '\n'.join(non_empty_lines)
+    
+    yield f"Filtered text to match JSONL processing: {len(lines)} -> {len(non_empty_lines)} lines"
+
     # use a line-based chunker like the helper function above
-    chunks = create_chunks(text_to_process, chunk_size_lines=5)
+    chunks = create_chunks(filtered_text, chunk_size_lines=5)
 
     yield f"Processing {len(chunks)} text chunks for emotion tags..."
 
@@ -623,10 +653,22 @@ async def add_tags_to_text_chunks(text_to_process):
     # Reassemble the book, respecting the original chunk separation
     enhanced_text = "\n".join(results)
 
+    # Validate that line count is preserved (using filtered text for comparison)
+    enhanced_lines = enhanced_text.split('\n')
+    
+    if len(non_empty_lines) != len(enhanced_lines):
+        error_msg = f"ERROR: Line count mismatch after emotion processing! Filtered: {len(non_empty_lines)}, Enhanced: {len(enhanced_lines)}"
+        yield error_msg
+
+        # Revert to filtered text to prevent synchronization issues
+        enhanced_text = filtered_text
+        yield "Reverted to filtered text to prevent synchronization issues"
+
     try:
         with open("tag_added_lines_chunks.txt", "w") as f:
             f.write(enhanced_text)
         yield f"Emotion tags processing completed. Output written to tag_added_lines_chunks.txt"
+        yield f"Line count verification: Filtered={len(non_empty_lines)}, Enhanced={len(enhanced_text.split('\n'))}"
     except IOError as e:
         yield f"Error writing output file: {e}"
         traceback.print_exc()

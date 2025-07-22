@@ -511,10 +511,7 @@ def apply_emotion_tags_to_multi_voice_data(json_data_array):
         # Read the enhanced lines from tag_added_lines_chunks.txt
         with open("tag_added_lines_chunks.txt", "r", encoding='utf-8') as f:
             enhanced_lines = f.read().split('\n')
-        
-        # Filter out empty lines to match the original JSONL processing
-        enhanced_lines = [line.strip() for line in enhanced_lines if line.strip()]
-        
+
         # Dynamically create enhanced JSONL data by matching enhanced lines with original speaker attributions
         if len(enhanced_lines) == len(json_data_array):
             for i, item in enumerate(json_data_array):

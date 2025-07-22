@@ -210,21 +210,29 @@ async def identify_character_gender_and_age_using_llm_and_assign_score(character
 
         # System prompt to guide the LLM in inferring age and gender
         system_prompt = f"""
-        {no_think_token}
-        You are an expert in analyzing character names and inferring their gender and age based on the character's name and the text excerpt. Take into consideration the character name and the text excerpt and then assign the age and gender accordingly. 
-        For a masculine character return the gender as 'male', for a feminine character return the gender as 'female' and for a character whose gender is neutral/ unknown return gender as 'unknown'. 
-        For assigning the age, if the character is a child return the age as 'child', if the character is an adult return the age as 'adult' and if the character is an elderly return the age as 'elderly'.
-        Return only the gender and age as the output. Dont give any explanation or doubt. 
-        Give the output as a string in the following format:
-        Age: <age>
-        Gender: <gender>"""
+{no_think_token}
+You are an expert in analyzing character names and inferring their gender and age based on the character's name and the text excerpt. Take into consideration the character name and the text excerpt and then assign the age and gender accordingly. 
+For a masculine character return the gender as 'male', for a feminine character return the gender as 'female' and for a character whose gender is neutral/ unknown return gender as 'unknown'. 
+For assigning the age, if the character is a child return the age as 'child', if the character is an adult return the age as 'adult' and if the character is an elderly return the age as 'elderly'.
+Return only the gender and age as the output. Dont give any explanation or doubt. 
+Give the output as a string in the following format:
+Age: <age>
+Gender: <gender>"""
 
         # User prompt containing the character name and dialogue context
         user_prompt = f"""
-        Character Name/ Character Description: {character_name}
+Character Name/ Character Description: 
 
-        Text Excerpt: {text_character_dialogues}
-        """
+<character_name>
+{character_name}
+</character_name>
+
+Text Excerpt: 
+
+<text_character_dialogues>
+{text_character_dialogues}
+</text_character_dialogues>
+"""
 
         # Query the LLM to infer age and gender
         response = await async_openai_client.chat.completions.create(
