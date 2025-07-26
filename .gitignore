@@ -12,6 +12,7 @@ character_gender_map.json
 converted_book.txt
 speaker_attributed_book.jsonl
 tag_added_lines_chunks.txt
+!sample_book_and_audio/tag_added_lines_chunks.txt
 extracted_book.txt
 chapter_list.txt
 chapters.txt
