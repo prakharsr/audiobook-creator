@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import re
+import shutil
 import sys
 import time
 import textract
@@ -72,15 +73,13 @@ def extract_text_from_book_using_calibre(book_path):
     if not validate_book_path(book_path):
         raise ValueError(f"Invalid or unsafe book path: {book_path}")
         
-    # Get ebook-convert binary path securely
-    allowed_commands = ['which']
-    ebook_convert_bin_result = run_shell_command_secure("which ebook-convert", allowed_commands)
-    
-    if not ebook_convert_bin_result or not ebook_convert_bin_result.stdout.strip():
+    # Get ebook-convert binary path
+    ebook_convert_bin_result = shutil.which("ebook-convert")
+    if not ebook_convert_bin_result or not os.path.exists(ebook_convert_bin_result.strip()):
         raise RuntimeError("ebook-convert command not found")
         
-    ebook_convert_bin_path = ebook_convert_bin_result.stdout.strip()
-
+    ebook_convert_bin_path = ebook_convert_bin_result.strip()
+    
     # Build secure command as list
     command = [ebook_convert_bin_path, book_path, "extracted_book.txt"]
     

@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import subprocess
 import re
 import os
+import shutil
 import traceback
 import shlex
 import json
@@ -70,14 +71,12 @@ def get_ebook_metadata_with_cover(book_path):
     if not validate_file_path(book_path):
         raise ValueError(f"Invalid or unsafe book path: {book_path}")
         
-    # Get ebook-meta binary path securely
-    allowed_commands = ['which', 'ebook-meta']
-    ebook_meta_bin_result = run_shell_command_secure("which ebook-meta", allowed_commands)
-    
-    if not ebook_meta_bin_result or not ebook_meta_bin_result.stdout.strip():
+    # Get ebook-meta binary path
+    ebook_meta_bin_result = shutil.which("ebook-meta")
+    if not ebook_meta_bin_result or not os.path.exists(ebook_meta_bin_result.strip()):
         raise RuntimeError("ebook-meta command not found")
         
-    ebook_meta_bin_path = ebook_meta_bin_result.stdout.strip()
+    ebook_meta_bin_path = ebook_meta_bin_result.strip()
 
     # Build secure command as list
     command = [ebook_meta_bin_path, book_path, "--get-cover", "cover.jpg"]
