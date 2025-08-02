@@ -111,7 +111,7 @@ async def generate_audio_with_retry(client: AsyncOpenAI, tts_model: str, text_to
                 response_format="wav",
                 speed=0.85,
                 input=text_to_speak,
-                timeout=3600
+                timeout=600
             ) as response:
                 async for chunk in response.iter_bytes():
                     audio_buffer.extend(chunk)
