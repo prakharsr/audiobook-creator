@@ -56,7 +56,6 @@ def sanitize_filename(text):
     text = text.replace("'", '').replace('"', '').replace('/', ' ').replace('.', ' ')
     text = text.replace(':', '').replace('?', '').replace('\\', '').replace('|', '')
     text = text.replace('*', '').replace('<', '').replace('>', '').replace('&', 'and')
-    text = text.replace(',', ' ').replace('-', ' ')
     
     # Normalize whitespace and trim
     text = ' '.join(text.split())
