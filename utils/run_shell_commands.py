@@ -69,12 +69,12 @@ def validate_file_path_allowlist(file_path):
         return False
     
     # Allowlist pattern for safe file paths
-    # Allows: letters, numbers, spaces, hyphens, underscores, dots, forward slashes
+    # Allows: letters, numbers, spaces, hyphens, underscores, dots, forward slashes, commas
     # Specifically excludes shell metacharacters and command injection patterns
-    safe_path_pattern = r"^[a-zA-Z0-9\s\-_.:/'\\]+\.[a-zA-Z0-9]{1,10}$|^[a-zA-Z0-9\s\-_.:/'\\]+/$"
+    safe_path_pattern = r"^[a-zA-Z0-9\s\-_.:/'\\,]+\.[a-zA-Z0-9]{1,10}$|^[a-zA-Z0-9\s\-_.:/'\\,]+/$"
     
     # Additional check for relative path traversal
-    safe_relative_pattern = r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\]+$"
+    safe_relative_pattern = r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\,]+$"
     
     return (re.match(safe_path_pattern, file_path) is not None and 
             re.match(safe_relative_pattern, file_path) is not None)
@@ -103,9 +103,9 @@ def validate_command_arguments_allowlist(args):
         # Allow safe argument patterns:
         safe_arg_patterns = [
             # File paths and extensions (no '..')
-            r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\]+\.[a-zA-Z0-9]{1,10}$",
+            r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\,]+\.[a-zA-Z0-9]{1,10}$",
             # Directory paths (no '..')
-            r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\]+/?$",
+            r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\,]+/?$",
             # Command flags like -y, --verbose, -map_metadata
             r'^-{1,2}[a-zA-Z0-9\-_:]+$',
             # Numbers with optional size suffixes and standalone numbers
