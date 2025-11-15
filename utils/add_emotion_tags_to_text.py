@@ -24,17 +24,139 @@ from tqdm.asyncio import tqdm_asyncio # Use tqdm's async version for better upda
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 from utils.llm_utils import check_if_have_to_include_no_think_token, clean_thinking_tags
+import tiktoken
 
 load_dotenv()
 
-OPENAI_BASE_URL=os.environ.get("OPENAI_BASE_URL", "http://localhost:1234/v1")
-OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY", "lm-studio")
-OPENAI_MODEL_NAME=os.environ.get("OPENAI_MODEL_NAME", "qwen3-14b")
+EMOTION_TAG_ADDITION_LLM_BASE_URL=os.environ.get("EMOTION_TAG_ADDITION_LLM_BASE_URL", "http://localhost:1234/v1")
+EMOTION_TAG_ADDITION_LLM_API_KEY=os.environ.get("EMOTION_TAG_ADDITION_LLM_API_KEY", "lm-studio")
+EMOTION_TAG_ADDITION_LLM_MODEL_NAME=os.environ.get("EMOTION_TAG_ADDITION_LLM_MODEL_NAME", "openai/gpt-oss-20b")
 NO_THINK_MODE = os.environ.get("NO_THINK_MODE", "true")
-LLM_MAX_PARALLEL_REQUESTS_BATCH_SIZE = int(os.environ.get("LLM_MAX_PARALLEL_REQUESTS_BATCH_SIZE", 1))
+EMOTION_TAG_ADDITION_LLM_MAX_PARALLEL_REQUESTS_BATCH_SIZE = int(os.environ.get("EMOTION_TAG_ADDITION_LLM_MAX_PARALLEL_REQUESTS_BATCH_SIZE", 1))
+MAX_INPUT_TOKENS = int(os.environ.get("MAX_INPUT_TOKENS", "500"))  # Max tokens per chunk for emotion processing
+EMOTION_CONTEXT_WINDOW_SIZE = int(os.environ.get("EMOTION_CONTEXT_WINDOW_SIZE", "2"))  # Number of lines before/after emotion keyword
 
-openai_llm_client = AsyncOpenAI(base_url=OPENAI_BASE_URL, api_key=OPENAI_API_KEY)
-model_name = OPENAI_MODEL_NAME
+_TOKENIZER = None
+
+def get_tokenizer():
+    """
+    Get or initialize the global tokenizer.
+    Uses cl100k_base encoding (GPT-4/GPT-3.5) as a good approximation for most LLMs.
+    """
+    global _TOKENIZER
+    if _TOKENIZER is None:
+        try:
+            # Use cl100k_base encoding (used by GPT-4, GPT-3.5-turbo, etc.)
+            # Provides good approximation for most modern LLMs
+            _TOKENIZER = tiktoken.get_encoding("cl100k_base")
+            print("✅ Initialized tiktoken (cl100k_base) for token counting")
+            print(f"📊 Token Configuration:")
+            print(f"   Max Input Tokens per Chunk: {MAX_INPUT_TOKENS} tokens")
+        except Exception as e:
+            print(f"⚠️  Failed to initialize tokenizer: {e}")
+    return _TOKENIZER
+
+def count_tokens(text: str) -> int:
+    """
+    Count tokens in text using tiktoken. Returns 0 if tokenizer unavailable.
+    Note: Uses cl100k_base encoding as approximation - actual count may vary by model.
+    """
+    tokenizer = get_tokenizer()
+    if tokenizer is None:
+        return 0
+    try:
+        return len(tokenizer.encode(text))
+    except Exception:
+        return 0
+
+openai_llm_client = AsyncOpenAI(base_url=EMOTION_TAG_ADDITION_LLM_BASE_URL, api_key=EMOTION_TAG_ADDITION_LLM_API_KEY)
+model_name = EMOTION_TAG_ADDITION_LLM_MODEL_NAME
+
+def join_lines_to_paragraphs(text):
+    """
+    Join consecutive non-empty lines into paragraphs for LLM processing.
+    Uses a special marker (|||) to preserve original line boundaries for later splitting.
+    
+    Args:
+        text (str): Text with each line separate
+        
+    Returns:
+        tuple: (paragraph_text, line_structure)
+            - paragraph_text: Text with lines joined, using ||| as line boundary markers
+            - line_structure: List of line counts per paragraph for splitting back
+    """
+    lines = text.split('\n')
+    paragraphs = []
+    line_structure = []  # Track how many original lines each paragraph contains
+    
+    # Use special marker to preserve line boundaries
+    LINE_MARKER = ' ||| '
+    
+    current_paragraph = []
+    
+    for line in lines:
+        if line.strip():  # Non-empty line
+            current_paragraph.append(line)
+        else:  # Empty line - paragraph boundary
+            if current_paragraph:
+                # Join lines with marker to preserve boundaries
+                paragraphs.append(LINE_MARKER.join(current_paragraph))
+                line_structure.append(len(current_paragraph))
+                current_paragraph = []
+            # Keep empty line as paragraph separator
+            paragraphs.append('')
+            line_structure.append(0)  # 0 means empty line
+    
+    # Don't forget last paragraph
+    if current_paragraph:
+        paragraphs.append(LINE_MARKER.join(current_paragraph))
+        line_structure.append(len(current_paragraph))
+    
+    return '\n'.join(paragraphs), line_structure
+
+def split_paragraphs_to_lines(paragraph_text, original_line_structure):
+    """
+    Split processed paragraphs back to original line structure using the ||| marker.
+    
+    Args:
+        paragraph_text (str): Text with paragraphs joined using ||| markers
+        original_line_structure (list): Line counts per paragraph from join_lines_to_paragraphs
+        
+    Returns:
+        str: Text split back to original line structure
+    """
+    # Use the same marker as join function
+    LINE_MARKER = ' ||| '
+    
+    paragraphs = paragraph_text.split('\n')
+    result_lines = []
+    
+    for i, paragraph in enumerate(paragraphs):
+        if i >= len(original_line_structure):
+            # Safety check - shouldn't happen
+            result_lines.append(paragraph)
+            continue
+            
+        line_count = original_line_structure[i]
+        
+        if line_count == 0:  # Empty line
+            result_lines.append('')
+        else:
+            # Split on the marker to restore original lines
+            split_lines = paragraph.split(LINE_MARKER)
+            
+            # Clean up the marker in case LLM didn't preserve it exactly
+            # (sometimes LLM might add spaces or slightly modify it)
+            if len(split_lines) != line_count:
+                # Marker wasn't preserved perfectly - try alternative splitting
+                print(f"Warning: Expected {line_count} lines but got {len(split_lines)} after splitting on marker")
+                # Fall back to smart splitting based on structure
+                result_lines.append(paragraph)  # Keep as single line if can't split properly
+            else:
+                # Perfect - marker was preserved
+                result_lines.extend(split_lines)
+    
+    return '\n'.join(result_lines)
 
 def fix_orphaned_tags_and_punctuation(text, original_text):
     """
@@ -388,15 +510,48 @@ def postprocess_emotion_tags(enhanced_text, original_text):
         }
 
 # Consider adding @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-async def enhance_text_with_emotions(text_segment):
-    """Process a text segment, adding emotion tags."""
+async def enhance_text_with_emotions(text_segment, semaphore=None):
+    """
+    Process a text segment, adding emotion tags.
+    
+    This function temporarily joins consecutive lines into paragraphs before LLM processing,
+    then splits them back to preserve the original line structure. This ensures the LLM
+    sees natural context (e.g., dialogue + attribution together) while maintaining the
+    exact line-by-line format required by the audio pipeline.
+    """
     if not text_segment.strip():
         return text_segment # Return empty/whitespace segments as is
 
+    # Store original text for later restoration if needed
+    original_text_segment = text_segment
+    
+    # Step 1: Join lines to paragraphs for better LLM context
+    paragraph_text, line_structure = join_lines_to_paragraphs(text_segment)
+
     no_think_token = check_if_have_to_include_no_think_token()
 
-    system_prompt = f"""{no_think_token}
-You are an expert editor specializing in preparing book scripts for Text-to-Speech (TTS) narration. Your task is to analyze text segments and insert specific emotion tags *only* where they are strongly implied and will enhance the audio experience. You must *never* alter the original text in any other way.
+    system_prompt = f"""{no_think_token}Reasoning: high
+You are an expert editor preparing audiobook scripts for production with MULTIPLE VOICE ACTORS. Each character has their own voice actor, and there's also a separate NARRATOR voice actor who reads the narration.
+
+**CRITICAL MENTAL MODEL - Think Like Voice Actors:**
+
+Imagine this audiobook recording setup:
+- There's a NARRATOR (one voice actor) who reads ALL narration and attribution
+- There are CHARACTER voice actors (different people) who speak ONLY their character's dialogue (text in quotes)
+
+When you see text like:
+```
+"Hello there!" ||| Dean laughed. ||| "How are you?"
+```
+
+The NARRATOR reads: "Dean laughed."
+The CHARACTER (Dean) reads: "Hello there!" and "How are you?"
+
+If the narration says "Dean laughed", that means:
+- The NARRATOR is DESCRIBING what Dean did
+- The actual LAUGH SOUND should come from DEAN's dialogue, NOT from the narrator describing it
+
+**CRITICAL: The text may contain special line boundary markers "|||" - you MUST preserve these EXACTLY as they appear. Do NOT remove, modify, or move these markers.**
 
 **Available Emotion Tags:**
 - `<laugh>` - For laughter or when text indicates laughing
@@ -411,110 +566,149 @@ You are an expert editor specializing in preparing book scripts for Text-to-Spee
 **Strict Rules - Follow These Exactly:**
 
 1.  **DO NOT MODIFY THE ORIGINAL TEXT:** This is the most important rule. Do not add, remove, or change *any* words, punctuation, or formatting from the original text, except for inserting the allowed emotion tags.
-2.  **PRESERVE ALL FORMATTING:** Maintain the exact line breaks, newlines, paragraph breaks, spacing, and indentation as they appear in the original text. Do NOT reformat, rewrap, or restructure the text in any way.
+
+2.  **PRESERVE ALL FORMATTING:** Maintain the exact line breaks, newlines, paragraph breaks, spacing, and indentation as they appear in the original text. Do NOT reformat, rewrap, or restructure the text in any way. Preserve the ||| markers exactly.
+
 3.  **ONLY USE THE PROVIDED TAGS:** Do not use any tags other than the 8 listed above. Output the tags exactly as shown with angle brackets: `<laugh>`, `<chuckle>`, `<sigh>`, `<cough>`, `<sniffle>`, `<groan>`, `<yawn>`, `<gasp>`.
-4.  **INSERT TAGS STRATEGICALLY:**
-    * **Dialogue:** ALWAYS place emotion tags WITHIN the dialogue quotes, never after them. Place tags *just before* the punctuation if the dialogue ends with punctuation, or add punctuation after the tag if none exists.
-    * **Attribution/Narration:** If a word like "laughed," "chuckled," "sighed," "coughed," "sniffled," "groaned," "yawned," "gasped," etc., is present, place the tag *just after* that word for natural audio flow. This creates better narrative flow where the listener hears the context first, then the emotion sound. Example: "He laughed `<laugh>` loudly." or "She coughed `<cough>` softly."
-    * **Implied Actions:** Only add tags to narration if it *explicitly describes* one of these sounds (e.g., "A `<gasp>` caught in her throat." or "He cleared his throat with a `<cough>` cough."). Do *not* add tags based on general emotional descriptions.
-    * **CRITICAL:** Never create standalone lines with only emotion tags. Always attach tags to substantial text content.
-5.  **DO NOT OVERUSE TAGS:** Only add a tag if the emotion is *clearly* stated or *very strongly* implied. If in doubt, *do not* add a tag. Less is more.
-6.  **MAINTAIN SPACING:** When inserting a tag, ensure there is a single space before it and a single space after it, *unless* it is adjacent to punctuation (like quotes or periods), in which case, place it logically. Example: "`<gasp>` 'No!' she cried." or "He sighed `<sigh>`."
-7.  **HANDLE QUOTES:** If adding a tag within dialogue, place it *inside* the quotation marks.
-8.  **PRESERVE LINE STRUCTURE:** If the input has multiple lines, empty lines, or specific line breaks, maintain them exactly. Do NOT merge lines or change the line structure.
-9.  **OUTPUT FORMAT:** Return *only* the text segment with the added tags. Do not add any explanations, apologies, or introductory/concluding remarks. Do not include any structural markup, delimiters, or formatting from the input prompt. If no tags are needed, return the *exact original text* with all formatting preserved.
+
+4.  **ABSOLUTE NECESSITY - USE TAGS EXTREMELY SPARINGLY:**
+    * Emotion tags should be RARE and EXCEPTIONAL - only add them when absolutely critical
+    * Most text should have NO emotion tags at all
+    * The text already describes emotions - tags are ONLY for when you need the actual SOUND EFFECT
+    * When in doubt, DO NOT ADD A TAG - err on the side of having fewer tags
+
+5.  **TAG PLACEMENT LOGIC (CRITICAL - WHO IS MAKING THE SOUND?):**
+
+    **ASK YOURSELF: "Which voice actor should make this sound?"**
+    
+    * **If a CHARACTER should make the sound → Put tag INSIDE their dialogue quotes**
+      - When narration says "X laughed", the CHARACTER X should laugh (not the narrator describing it)
+      - Find X's dialogue (the text in quotes that X is speaking) and put the tag there
+      - Example:
+        ```
+        Input:  "Would you?" ||| Dean laughed. ||| "Look at you..."
+        WRONG:  "Would you?" ||| Dean laughed <laugh>. ||| "Look at you..."  ← Narrator makes sound!
+        RIGHT:  "Would you? <laugh>" ||| Dean laughed. ||| "Look at you..."  ← Dean makes sound!
+        ```
+      
+    * **NEVER place emotion tags in narration when referring to a character's action**
+      - "Dean laughed" is NARRATION (spoken by narrator) - DO NOT put tag here
+      - "She chuckled" is NARRATION (spoken by narrator) - DO NOT put tag here
+      - "He sighed" is NARRATION (spoken by narrator) - DO NOT put tag here
+      - Instead, find that character's nearby dialogue and place tag INSIDE their quotes
+    
+    * **Only put tags in narration if it's a pure descriptive sound without a character**
+      - Example: "A laugh <laugh> echoed through the empty hall." (no specific character)
+      - But if narration says "X laughed", find X's dialogue and put tag there instead
+
+6.  **FINDING THE RIGHT DIALOGUE FOR THE TAG:**
+    * Look for dialogue NEAR the narration that describes the emotion
+    * Usually the character's dialogue appears just BEFORE or just AFTER the narration
+    * Place the tag in that character's dialogue (inside the quotes), not in the narration
+    * If you cannot find nearby dialogue from that character, DO NOT add a tag at all
+
+7.  **MAINTAIN SPACING:** When inserting a tag, ensure there is a single space before it, *unless* it is adjacent to punctuation.
+
+8.  **OUTPUT FORMAT:** Return *only* the text segment with the added tags. Do not add any explanations, apologies, or introductory/concluding remarks. If no tags are needed, return the *exact original text* with all formatting preserved.
 
 **Examples:**
 
-* **Input:** "I can't believe you did that!" she laughed.
-* **Good Output:** "I can't believe you did that!" she laughed `<laugh>`.
+**CRITICAL EXAMPLES - Voice Actor Perspective:**
 
-* **Input:** He looked tired. "I need some sleep."
-* **Good Output:** He looked tired. "I need some sleep `<yawn>`."
+* **Example 1 - Character Emotion in Dialogue:**
+```
+Input:  "Would you?" ||| Dean Highbottom laughed. ||| "Look at you..."
+```
+**WRONG Output:** `"Would you?" ||| Dean Highbottom laughed <laugh>. ||| "Look at you..."`
+- Why Wrong: The NARRATOR is saying "Dean Highbottom laughed" - this makes the narrator make the laugh sound!
 
-* **Input:** "Look what I found! It's a treasure map!"
-* **Bad Output:** "Look what I found! It's a treasure map!" `<laugh>` (Creates orphaned tag)
-* **Good Output:** "Look what I found! It's a treasure map `<laugh>`!" (Tag within dialogue, before punctuation)
+**CORRECT Output:** `"Would you? <laugh>" ||| Dean Highbottom laughed. ||| "Look at you..."`
+- Why Correct: DEAN (the character) makes the laugh sound in HIS dialogue. The narrator just describes what Dean did.
+- Think: Dean is laughing WHILE speaking "Would you?" - his voice actor makes the sound.
 
-* **Input:** "Oh, dear," she said with a sigh.
-* **Good Output:** "Oh, dear," she said with a sigh `<sigh>`.
+* **Example 2 - Character Emotion with Attribution:**
+```
+Input:  "We won't hurt you," ||| said Sejanus. ||| Mayfair gave an ugly laugh. ||| "'Course you won't."
+```
+**WRONG Output:** `"We won't hurt you," ||| said Sejanus. ||| Mayfair gave an ugly laugh <laugh>. ||| "'Course you won't."`
+- Why Wrong: "Mayfair gave an ugly laugh" is NARRATION - the narrator is describing Mayfair's action.
 
-* **Input:** He cleared his throat before speaking.
-* **Good Output:** He cleared `<cough>` his throat before speaking.
+**CORRECT Output:** `"We won't hurt you," ||| said Sejanus. ||| Mayfair gave an ugly laugh. ||| "'Course you won't <laugh>."`
+- Why Correct: MAYFAIR (the character) makes the laugh sound in HER dialogue "'Course you won't."
+- Think: Mayfair is laughing while saying her line - her voice actor makes the sound.
+
+* **Example 3 - When Character Has No Nearby Dialogue:**
+```
+Input:  The man laughed and walked away into the darkness.
+```
+**WRONG Output:** `The man laughed <laugh> and walked away into the darkness.`
+- Why Wrong: "The man laughed" is NARRATION, but we can't find the man's dialogue to put tag in.
+
+**CORRECT Output:** `The man laughed and walked away into the darkness.`
+- Why Correct: NO TAG ADDED - the man has no dialogue here, so we cannot add the emotion sound. The narrator just describes what happened.
+
+* **Example 4 - Inline Dialogue with Emotion:**
+```
+Input:  "I can't believe you did that!" she laughed.
+```
+**CORRECT Output:** `"I can't believe you did that! <laugh>" she laughed.`
+- Why Correct: The CHARACTER is laughing while speaking her dialogue. Tag goes INSIDE her quotes.
+
+* **Example 5 - Pure Narration (No Character):**
+```
+Input:  A laugh echoed through the empty hall.
+```
+**CORRECT Output:** `A laugh <laugh> echoed through the empty hall.`
+- Why Correct: This is a pure sound description (no specific character), so narrator can make the sound.
+
+**NO TAG NEEDED EXAMPLES:**
 
 * **Input:** The wind howled outside.
-* **Good Output:** The wind howled outside. (No tag needed)
-
-* **Input:** Mia held up a dusty, old map she had found in her attic. "Look what I found! It's a treasure map!".
-* **Bad Output:** Mia held up a dusty, old map she had found in her attic. "Look what I found! It's a treasure map!" `<exclamation>` (Invalid tag - not in official list)
-* **Good Output:** Mia held up a dusty, old map she had found in her attic. "Look what I found! It's a treasure map!" (No tag needed - excitement implied but no specific sound mentioned)
+* **Output:** The wind howled outside.
+* **Why:** No human emotion sound.
 
 * **Input:** "Get out!" he shouted.
-* **Bad Output:** "`<groan>` 'Get out!' he shouted." (Groan not implied)
+* **Output:** "Get out!" he shouted.
+* **Why:** Shouting is not in our 8 emotion tags list.
 
-* **Input:** "It's funny," he chuckled.
-* **Bad Output:** "It's `<chuckle>` funny." (Tag should be by 'chuckled')
-* **Good Output:** "It's funny," he `<chuckle>` chuckled.
+**CRITICAL REMINDERS - VOICE ACTOR MENTAL MODEL:**
+- Think: "WHO is making this sound - the narrator or a character?"
+- If a CHARACTER should make the sound → find their DIALOGUE and put tag INSIDE quotes
+- NEVER put character emotion tags in narration (lines without quotes)
+- "X laughed" in narration = narrator DESCRIBING X's action (don't tag here!)
+- Find X's dialogue (text X is speaking in quotes) and tag there instead
+- Use tags SPARINGLY - most text should have NO tags
+- When in doubt, DO NOT add a tag
+- PRESERVE the ||| markers exactly as they appear
 
-* **Input:** "Stop!" she cried, gasping for air.
-* **Good Output:** "Stop `<gasp>`!" she cried, gasping `<gasp>` for air.
-
-* **Input:** Luna gasped in surprise.
-* **Bad Output:** Luna `<gasp>` gasped in surprise. (Emotion before context - sounds unnatural)
-* **Good Output:** Luna gasped `<gasp>` in surprise. (Context first, then emotion sound)
-
-* **Input:** The five friends laughed together.
-* **Bad Output:** The five friends `<laugh>` laughed together. (Emotion before context)
-* **Good Output:** The five friends laughed `<laugh>` together. (Natural flow: word then sound)
-
-* **Input:** "What are you doing here?"
-* **Bad Output:** "What are you doing here?" `<sigh>` (Creates orphaned tag)
-* **Good Output:** "What are you doing here `<sigh>`?" (Tag within dialogue, adds punctuation)
-
-**Line Break Preservation Examples:**
-
-* **Input:** 
-```
-"Hello there," she said.
-
-He sighed deeply.
-"I don't know what to do."
-```
-* **Good Output:** 
-```
-"Hello there," she said.
-
-He `<sigh>` sighed deeply.
-"I don't know what to do."
-```
-
-* **Input:** 
-```
-The room was quiet.
-    "Are you okay?" she whispered.
-    
-    There was no response.
-```
-* **Good Output:** 
-```
-The room was quiet.
-    "Are you okay?" she whispered.
-    
-    There was no response.
-```
-
-Now, analyze the following text segment and apply these rules precisely.
+Now, analyze the following text segment. Remember: you are preparing this for MULTIPLE VOICE ACTORS where each character has their own voice, and there's a separate narrator voice.
 """
 
-    user_prompt = f"""Please analyze this text and add appropriate emotion tags:
+    # Step 2: Send paragraph_text (joined) to LLM, not original line-by-line text
+    user_prompt = f"""Please analyze this text and add appropriate emotion tags ONLY where ABSOLUTELY NECESSARY.
+
+CRITICAL - THINK LIKE A VOICE ACTOR DIRECTOR:
+- ASK: "Which voice actor should make this sound - the narrator or a character?"
+- If narration says "X laughed" → find X's DIALOGUE and put <laugh> INSIDE X's quotes
+- NEVER put character emotion tags in narration - the narrator just describes what happened
+- Use tags EXTREMELY SPARINGLY - most text should have NO tags
+- Only add tags for explicitly mentioned emotion sounds (laugh, chuckle, sigh, cough, sniffle, groan, yawn, gasp)
+- PRESERVE the ||| markers exactly
+- When in doubt, DO NOT add a tag
 
 ===== TEXT TO PROCESS =====
-{text_segment}
+{paragraph_text}
 ===== END TEXT =====
 
 Return *only* the modified text segment with any needed emotion tags. Do not include the delimiter lines in your response."""
 
-    try:
+    async def _call_llm():
+        """Internal function to make the actual LLM call."""
+        # Count tokens for monitoring
+        system_tokens = count_tokens(system_prompt)
+        user_tokens = count_tokens(user_prompt)
+        total_input_tokens = system_tokens + user_tokens
+        
         response = await openai_llm_client.chat.completions.create(
             model=model_name,
             messages=[
@@ -525,44 +719,94 @@ Return *only* the modified text segment with any needed emotion tags. Do not inc
         )
         enhanced_text = response.choices[0].message.content.strip()
         cleaned_content = clean_thinking_tags(enhanced_text)
+        
+        # Log token usage
+        output_tokens = count_tokens(cleaned_content)
+        total_tokens = total_input_tokens + output_tokens
+        print(f"📊 Emotion Tags - Usage: {total_input_tokens} input ({system_tokens} system + {user_tokens} user), {output_tokens} output, {total_tokens} total")
 
-        # Apply comprehensive postprocessing validation
-        validation_result = postprocess_emotion_tags(cleaned_content, text_segment)
+        split_result = split_paragraphs_to_lines(cleaned_content, line_structure)
+
+        # Apply comprehensive postprocessing validation (using original line-by-line text)
+        validation_result = postprocess_emotion_tags(split_result, original_text_segment)
         return validation_result
+    
+    try:
+        # Use semaphore if provided to control concurrency
+        if semaphore:
+            async with semaphore:
+                return await _call_llm()
+        else:
+            return await _call_llm()
     except Exception as e:
-        print(f"Error querying LLM for segment: '{text_segment[:50]}...': {e}")
+        print(f"Error querying LLM for segment: '{original_text_segment[:50]}...': {e}")
         traceback.print_exc()
         return {
-            'text': text_segment,
+            'text': original_text_segment,
             'success': False,
             'reverted': True,
             'reason': f"LLM query error: {str(e)}"
         }
 
-def create_chunks(text, chunk_size_lines=5):
-    """Splits text into chunks, trying to respect paragraphs."""
+def create_chunks(text, max_tokens=None, chunk_size_lines=5):
+    """
+    Splits text into chunks based on token count, trying to respect paragraphs.
+    
+    Args:
+        text (str): Text to split into chunks
+        max_tokens (int, optional): Maximum tokens per chunk. Defaults to MAX_INPUT_TOKENS.
+        chunk_size_lines (int): Fallback line-based chunk size if tokenizer unavailable
+        
+    Returns:
+        list: List of text chunks
+    """
+    if max_tokens is None:
+        max_tokens = MAX_INPUT_TOKENS
+    
     lines = text.split('\n')
     chunks = []
     current_chunk = []
-
+    current_token_count = 0
+    
+    # Initialize tokenizer
+    get_tokenizer()
+    
     for line in lines:
-        current_chunk.append(line)
-        # If line is a paragraph break OR chunk size reached
-        if not line.strip() or len(current_chunk) >= chunk_size_lines:
+        line_tokens = count_tokens(line)
+        
+        # Check if adding this line would exceed token limit
+        if current_chunk and (current_token_count + line_tokens > max_tokens):
+            # Save current chunk and start new one
             chunks.append("\n".join(current_chunk))
             current_chunk = []
+            current_token_count = 0
+        
+        current_chunk.append(line)
+        current_token_count += line_tokens
+        
+        # Also break on paragraph boundaries (empty lines) for natural breaks
+        if not line.strip() and current_chunk:
+            chunks.append("\n".join(current_chunk))
+            current_chunk = []
+            current_token_count = 0
 
     if current_chunk: # Add any remaining lines
         chunks.append("\n".join(current_chunk))
+    
+    # Log chunking statistics
+    if chunks:
+        avg_tokens = sum(count_tokens(chunk) for chunk in chunks) / len(chunks)
+        print(f"📦 Created {len(chunks)} chunks | Avg tokens per chunk: {avg_tokens:.0f} | Max tokens: {max_tokens}")
 
     return chunks
 
-async def process_chunk_line_by_line(chunk):
+async def process_chunk_line_by_line(chunk, semaphore=None):
     """
     Fallback function to process a chunk line by line when chunk-based processing fails.
     
     Args:
         chunk (str): The text chunk that failed chunk-based processing
+        semaphore: Optional semaphore to control concurrency of LLM requests
         
     Returns:
         str: The chunk with emotion tags added line by line
@@ -573,8 +817,8 @@ async def process_chunk_line_by_line(chunk):
     for line in lines:
         if line.strip():  # Only process non-empty lines
             try:
-                # Process each line individually
-                result = await enhance_text_with_emotions(line)
+                # Process each line individually, passing semaphore for concurrency control
+                result = await enhance_text_with_emotions(line, semaphore=semaphore)
                 processed_lines.append(result['text'])
             except Exception as e:
                 print(f"Error processing individual line, using original: {e}")
@@ -584,6 +828,82 @@ async def process_chunk_line_by_line(chunk):
             processed_lines.append(line)
     
     return '\n'.join(processed_lines)
+
+def extract_emotion_context_windows(text, context_sentences=2):
+    """
+    Extract context windows around emotion-related keywords using sliding window approach.
+    
+    This function implements a major optimization: instead of processing the entire book
+    with the LLM, we only process text segments that contain emotion-related keywords
+    (laugh, chuckle, sigh, etc.). This can reduce LLM calls by 70-90% depending on the book.
+    
+    Algorithm:
+    1. Search for emotion keywords: laugh|chuckle|sigh|cough|sniffle|groan|yawn|gasp
+    2. Extract context window (N lines before/after) around each keyword match
+    3. Merge overlapping windows to avoid duplicate processing
+    4. Return only these focused windows for LLM processing
+    5. Unprocessed text segments remain unchanged in the final output
+    
+    Args:
+        text (str): Full text to search
+        context_sentences (int): Number of lines to include before/after keyword
+        
+    Returns:
+        tuple: (windows, original_lines)
+            - windows: List of dicts with {'text': str, 'start_line': int, 'end_line': int}
+            - original_lines: List of all original text lines for reassembly
+    """
+    import re
+    
+    # Emotion keywords pattern - match word boundaries to avoid partial matches
+    emotion_pattern = r'\b(laugh|chuckle|sigh|cough|sniffle|groan|yawn|gasp)(ed|ing|s|es)?\b'
+    
+    lines = text.split('\n')
+    windows = []
+    processed_line_ranges = set()  # Track which line ranges we've already processed
+    
+    # Find all lines containing emotion keywords
+    for line_idx, line in enumerate(lines):
+        if re.search(emotion_pattern, line, re.IGNORECASE):
+            # Calculate window boundaries (sentences are approximated by line groups)
+            start_idx = max(0, line_idx - context_sentences)
+            end_idx = min(len(lines), line_idx + context_sentences + 1)
+            
+            # Create a tuple representing this range
+            range_key = (start_idx, end_idx)
+            
+            # Skip if we've already covered this range (handles overlapping windows)
+            if range_key in processed_line_ranges:
+                continue
+            
+            # Check if this range overlaps with existing windows
+            overlaps = False
+            for existing_start, existing_end in list(processed_line_ranges):
+                # Check for overlap
+                if not (end_idx <= existing_start or start_idx >= existing_end):
+                    # Merge overlapping windows by extending the range
+                    new_start = min(start_idx, existing_start)
+                    new_end = max(end_idx, existing_end)
+                    processed_line_ranges.discard((existing_start, existing_end))
+                    processed_line_ranges.add((new_start, new_end))
+                    overlaps = True
+                    break
+            
+            if not overlaps:
+                processed_line_ranges.add(range_key)
+    
+    # Convert line ranges to text windows
+    for start_idx, end_idx in sorted(processed_line_ranges):
+        window_lines = lines[start_idx:end_idx]
+        window_text = '\n'.join(window_lines)
+        windows.append({
+            'text': window_text,
+            'start_line': start_idx,
+            'end_line': end_idx,
+            'line_count': end_idx - start_idx
+        })
+    
+    return windows, lines
 
 async def add_tags_to_text_chunks(text_to_process):
     """Processes the book text in chunks and yields progress updates."""
@@ -595,40 +915,76 @@ async def add_tags_to_text_chunks(text_to_process):
     
     yield f"Filtered text to match JSONL processing: {len(lines)} -> {len(non_empty_lines)} lines"
 
-    # use a line-based chunker like the helper function above
-    chunks = create_chunks(filtered_text, chunk_size_lines=5)
+    # OPTIMIZATION: Extract only context windows around emotion keywords
+    yield "Searching for emotion-related keywords in text..."
+    windows, original_lines = extract_emotion_context_windows(filtered_text, context_sentences=EMOTION_CONTEXT_WINDOW_SIZE)
+    
+    if not windows:
+        yield "No emotion keywords found in text. Skipping LLM processing."
+        # Write original text and return early
+        try:
+            with open("tag_added_lines_chunks.txt", "w") as f:
+                f.write(filtered_text)
+            yield f"No emotion tags needed. Output written to tag_added_lines_chunks.txt"
+            yield f"Line count verification: Filtered={len(non_empty_lines)}, Enhanced={len(filtered_text.split('\n'))}"
+        except IOError as e:
+            yield f"Error writing output file: {e}"
+            traceback.print_exc()
+        return
+    
+    total_lines_to_process = sum(w['line_count'] for w in windows)
+    coverage_percent = (total_lines_to_process / len(non_empty_lines)) * 100 if non_empty_lines else 0
+    
+    yield f"Found {len(windows)} context windows containing emotion keywords"
+    yield f"Processing {total_lines_to_process} lines ({coverage_percent:.1f}% of text) instead of all {len(non_empty_lines)} lines"
+    yield f"Estimated LLM call reduction: {100 - coverage_percent:.1f}%"
 
-    yield f"Processing {len(chunks)} text chunks for emotion tags..."
+    # Use token-based chunker with max 4k tokens per chunk - but only on filtered windows
+    chunks = []
+    chunk_mappings = []  # Track which lines each chunk corresponds to
+    
+    for window in windows:
+        window_chunks = create_chunks(window['text'], max_tokens=MAX_INPUT_TOKENS)
+        for chunk in window_chunks:
+            chunks.append(chunk)
+            chunk_mappings.append({
+                'start_line': window['start_line'],
+                'end_line': window['end_line']
+            })
 
-    semaphore = asyncio.Semaphore(LLM_MAX_PARALLEL_REQUESTS_BATCH_SIZE)
+    yield f"Processing {len(chunks)} text chunks for emotion tags (max {MAX_INPUT_TOKENS} tokens per chunk)..."
+
+    # Create shared semaphore to control total concurrent LLM requests
+    # This ensures concurrency limit is respected across both chunk and line-by-line processing
+    semaphore = asyncio.Semaphore(EMOTION_TAG_ADDITION_LLM_MAX_PARALLEL_REQUESTS_BATCH_SIZE)
     progress_counter = 0
     total_chunks = len(chunks)
 
     async def process_chunk(chunk_index, chunk):
         nonlocal progress_counter
-        async with semaphore:
-            # Try chunk-based processing first
-            enhancement_result = await enhance_text_with_emotions(chunk)
-            final_result = enhancement_result['text']
-            
-            # Check if postprocessing failed and we need fallback
-            if enhancement_result['reverted'] and enhancement_result['reason']:
-                print(f"Chunk {chunk_index}: Chunk processing failed ({enhancement_result['reason']})")
-                print(f"Chunk {chunk_index}: Falling back to line-by-line processing")
-                try:
-                    final_result = await process_chunk_line_by_line(chunk)
-                except Exception as e:
-                    print(f"Chunk {chunk_index}: Line-by-line fallback also failed: {e}")
-                    final_result = chunk  # Use original chunk if both methods fail
-            
-            progress_counter += 1
-            return {
-                "index": chunk_index,
-                "result": final_result,
-                "progress": progress_counter
-            }
+        # Try chunk-based processing first, passing semaphore for concurrency control
+        enhancement_result = await enhance_text_with_emotions(chunk, semaphore=semaphore)
+        final_result = enhancement_result['text']
+        
+        # Check if postprocessing failed and we need fallback
+        if enhancement_result['reverted'] and enhancement_result['reason']:
+            print(f"Chunk {chunk_index}: Chunk processing failed ({enhancement_result['reason']})")
+            print(f"Chunk {chunk_index}: Falling back to line-by-line processing")
+            try:
+                # Pass semaphore to line-by-line processing to maintain concurrency control
+                final_result = await process_chunk_line_by_line(chunk, semaphore=semaphore)
+            except Exception as e:
+                print(f"Chunk {chunk_index}: Line-by-line fallback also failed: {e}")
+                final_result = chunk  # Use original chunk if both methods fail
+        
+        progress_counter += 1
+        return {
+            "index": chunk_index,
+            "result": final_result,
+            "progress": progress_counter
+        }
 
-    yield f"Processing {total_chunks} chunks for emotion tags (max {LLM_MAX_PARALLEL_REQUESTS_BATCH_SIZE} concurrent)..."
+    yield f"Processing {total_chunks} chunks for emotion tags (max {EMOTION_TAG_ADDITION_LLM_MAX_PARALLEL_REQUESTS_BATCH_SIZE} concurrent)..."
     
     # Create tasks with chunk indices
     tasks = []
@@ -650,9 +1006,35 @@ async def add_tags_to_text_chunks(text_to_process):
     
     yield f"Completed processing all {total_chunks} emotion tag chunks"
 
-    # Reassemble the book, respecting the original chunk separation
-    enhanced_text = "\n".join(results)
-
+    # Reassemble the book by mapping processed windows back to original positions
+    yield "Reassembling text with processed emotion tag windows..."
+    
+    # Start with original lines (unprocessed)
+    final_lines = original_lines.copy()
+    
+    # Map processed chunks back to their original line positions
+    for i, chunk_result in enumerate(results):
+        mapping = chunk_mappings[i]
+        processed_lines = chunk_result.split('\n')
+        
+        # Replace the corresponding lines in the final output
+        start_line = mapping['start_line']
+        end_line = mapping['end_line']
+        
+        # Calculate how many lines to replace
+        lines_to_replace = end_line - start_line
+        
+        if len(processed_lines) == lines_to_replace:
+            # Direct replacement if line count matches
+            for j, processed_line in enumerate(processed_lines):
+                final_lines[start_line + j] = processed_line
+        else:
+            # Handle line count mismatch - this shouldn't happen with our validation
+            # but adding safety check
+            yield f"Warning: Line count mismatch in chunk {i} (expected {lines_to_replace}, got {len(processed_lines)})"
+    
+    enhanced_text = '\n'.join(final_lines)
+    
     # Validate that line count is preserved (using filtered text for comparison)
     enhanced_lines = enhanced_text.split('\n')
     

@@ -314,6 +314,9 @@ async def generate_audio_with_single_voice(output_format, narrator_gender, gener
                     continue
 
                 voice_to_speak_in = narrator_voice if part["type"] == "narration" else dialogue_voice
+
+                # strip all double quotes from the text to speak
+                text_to_speak = text_to_speak.replace('"', '').replace('\\', '')
                 
                 # Create temporary file for this part
                 temp_file = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
@@ -668,6 +671,9 @@ async def generate_audio_with_multiple_voices(output_format, narrator_gender, ge
                     continue
 
                 voice_to_speak_in = narrator_voice if part["type"] == "narration" else speaker_voice
+
+                # strip all double quotes and backslashes from the text to speak
+                text_to_speak = text_to_speak.replace('"', '').replace('\\', '')
                 
                 # Create temporary file for this part
                 temp_file = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)

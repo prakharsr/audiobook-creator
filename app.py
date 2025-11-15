@@ -40,13 +40,14 @@ def validate_book_upload(book_file, book_title):
         return gr.Warning("Please upload a book file first.")
     
     if not book_title:
-        return gr.Warning("Please enter a book title.")
+        book_title = os.path.splitext(os.path.basename(book_file.name))[0]
     
+    yield book_title
     return gr.Info(f"Book '{book_title}' ready for processing.", duration=5)
 
-def text_extraction_wrapper(book_file, text_decoding_option, book_title):
+def text_extraction_wrapper(book_file, text_decoding_option):
     """Wrapper for text extraction with validation and progress updates"""
-    if book_file is None or not book_title:
+    if book_file is None:
         yield None
         return gr.Warning("Please upload a book file and enter a title first.")
     
@@ -72,13 +73,10 @@ def text_extraction_wrapper(book_file, text_decoding_option, book_title):
         yield None
         return gr.Warning(f"Error extracting text: {str(e)}")
 
-def save_book_wrapper(text_content, book_title):
+def save_book_wrapper(text_content):
     """Wrapper for saving book with validation"""
     if not text_content:
         return gr.Warning("No text content to save.")
-    
-    if not book_title:
-        return gr.Warning("Please enter a book title before saving.")
     
     try:
         save_book(text_content)
@@ -88,17 +86,13 @@ def save_book_wrapper(text_content, book_title):
         traceback.print_exc()
         return gr.Warning(f"Error saving book: {str(e)}")
 
-async def identify_characters_wrapper(book_title):
+async def identify_characters_wrapper():
     """Wrapper for character identification with validation and progress updates"""
-    if not book_title:
-        yield gr.Warning("Please enter a book title first.")
-        yield None
-        return
 
     try:
         last_output = None
         # Pass through all yield values from the original function
-        async for output in process_book_and_identify_characters(book_title):
+        async for output in process_book_and_identify_characters():
             last_output = output
             yield output  # Yield each progress update
         
@@ -113,7 +107,7 @@ async def identify_characters_wrapper(book_title):
         yield None
         return
 
-async def add_emotion_tags_wrapper():
+async def add_emotion_tags_wrapper(characters_identified_state):
     """Wrapper for emotion tags processing with validation and progress updates"""
 
     # Check if TTS engine supports emotion tags
@@ -126,10 +120,10 @@ async def add_emotion_tags_wrapper():
     try:
         last_output = None
         # Use the unified emotion tags processing function (voice-agnostic)
-        async for output in process_emotion_tags():
+        async for output in process_emotion_tags(characters_identified_state):
             last_output = output
             yield output
-        
+
         # Final yield with success notification
         yield gr.Info("Emotion tags added successfully! You can now generate the audiobook.", duration=5)
         yield last_output
@@ -141,7 +135,7 @@ async def add_emotion_tags_wrapper():
         yield None
         return
 
-async def generate_audiobook_wrapper(voice_type, narrator_gender, output_format, book_file, emotion_tags_processed_state):
+async def generate_audiobook_wrapper(voice_type, narrator_gender, output_format, book_file, emotion_tags_processed_state, book_title):
     """Wrapper for audiobook generation with validation and progress updates"""
     if book_file is None:
         yield gr.Warning("Please upload a book file first."), None
@@ -186,6 +180,10 @@ async def generate_audiobook_wrapper(voice_type, narrator_gender, output_format,
         
         # Set the audiobook file path according to the provided information
         audiobook_path = os.path.join("generated_audiobooks", f"audiobook.{file_extension}")
+
+        # Rename the audiobook file to the book title
+        os.rename(audiobook_path, os.path.join("generated_audiobooks", f"{book_title}.{file_extension}"))
+        audiobook_path = os.path.join("generated_audiobooks", f"{book_title}.{file_extension}")
         
         # Final yield with success notification and file path
         yield gr.Info(f"Audiobook generated successfully in {output_format} format! You can now download it in the Download section. Click on the blue download link next to the file name.", duration=10), None
@@ -203,12 +201,19 @@ def update_emotion_tags_status_and_state():
     # Return both the updated status display and set session state to True
     return gr.update(value="✅ Emotion tags processed - will be used in audiobook"), True
 
+def update_characters_identified_state():
+    """Set characters_identified state to True after character identification"""
+    return True
+
 with gr.Blocks(css=css, theme=gr.themes.Default()) as gradio_app:
     gr.Markdown("# 📖 Audiobook Creator")
     gr.Markdown("Create professional audiobooks from your ebooks in just a few steps.")
     
     # Session state to track if emotion tags were processed
     emotion_tags_processed = gr.State(False)
+
+    # Session state to track if characters were identified
+    characters_identified = gr.State(False)
     
     # Get TTS configuration from environment variables
     current_tts_engine = os.environ.get("TTS_MODEL", "kokoro").lower()
@@ -221,7 +226,7 @@ with gr.Blocks(css=css, theme=gr.themes.Default()) as gradio_app:
             book_title = gr.Textbox(
                 label="Book Title", 
                 placeholder="Enter the title of your book",
-                info="This will be used for finding the protagonist of the book in the character identification step"
+                info="This will be used for naming the audiobook file"
             )
             
             book_input = gr.File(
@@ -383,33 +388,38 @@ with gr.Blocks(css=css, theme=gr.themes.Default()) as gradio_app:
     validate_btn.click(
         validate_book_upload, 
         inputs=[book_input, book_title], 
-        outputs=[]
+        outputs=[book_title]
     )
     
     convert_btn.click(
         text_extraction_wrapper, 
-        inputs=[book_input, text_decoding_option, book_title], 
+        inputs=[book_input, text_decoding_option], 
         outputs=[text_output],
         queue=True
     )
     
     save_btn.click(
         save_book_wrapper, 
-        inputs=[text_output, book_title], 
+        inputs=[text_output], 
         outputs=[],
         queue=True
     )
     
     identify_btn.click(
-        identify_characters_wrapper, 
-        inputs=[book_title], 
+        identify_characters_wrapper,
+        inputs=[],
         outputs=[character_output],
         queue=True
+    ).then(
+        # Update characters_identified state after character identification completes
+        update_characters_identified_state,
+        inputs=[],
+        outputs=[characters_identified]
     )
     
     emotion_tags_btn.click(
-        add_emotion_tags_wrapper, 
-        inputs=[], 
+        add_emotion_tags_wrapper,
+        inputs=[characters_identified],
         outputs=[emotion_tags_output],
         queue=True
     ).then(
@@ -422,7 +432,7 @@ with gr.Blocks(css=css, theme=gr.themes.Default()) as gradio_app:
     # Update the generate_audiobook_wrapper to output both progress text and file path
     generate_btn.click(
         generate_audiobook_wrapper, 
-        inputs=[voice_type, narrator_gender, output_format, book_input, emotion_tags_processed], 
+        inputs=[voice_type, narrator_gender, output_format, book_input, emotion_tags_processed, book_title], 
         outputs=[audio_output, audiobook_file],
         queue=True
     ).then(

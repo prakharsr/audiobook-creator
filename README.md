@@ -2,7 +2,7 @@
 
 ## Overview
 
-Audiobook Creator is an open-source project designed to convert books in various text formats (e.g., EPUB, PDF, etc.) into fully voiced audiobooks with intelligent character voice attribution. It leverages modern Natural Language Processing (NLP), Large Language Models (LLMs), and Text-to-Speech (TTS) technologies to create an engaging and dynamic audiobook experience. The project features professional-grade TTS engines including [Kokoro TTS](https://huggingface.co/hexgrad/Kokoro-82M) and [Orpheus-TTS](https://github.com/canopyai/Orpheus-TTS) with advanced async parallel processing, offering exceptional audio quality with memory-efficient processing. The project is licensed under the GNU General Public License v3.0 (GPL-3.0), ensuring that it remains free and open for everyone to use, modify, and distribute.
+Audiobook Creator is an open-source project designed to convert books in various text formats (e.g., EPUB, PDF, etc.) into fully voiced audiobooks with intelligent character voice attribution. It leverages modern Large Language Models (LLMs), and Text-to-Speech (TTS) technologies to create an engaging and dynamic audiobook experience. The project features professional-grade TTS engines including [Kokoro TTS](https://huggingface.co/hexgrad/Kokoro-82M) and [Orpheus-TTS](https://github.com/canopyai/Orpheus-TTS) with advanced async parallel processing, offering exceptional audio quality with memory-efficient processing. The project is licensed under the GNU General Public License v3.0 (GPL-3.0), ensuring that it remains free and open for everyone to use, modify, and distribute.
 
 Sample multi voice audio for a short story generated using *Orpheus TTS* (with added emotions and better sounding audio) : https://audio.com/prakhar-sharma/audio/sample-orpheus-multi-voice-audiobook-orpheus
 
@@ -18,12 +18,11 @@ Watch the demo video:
 1. **Text Cleaning and Formatting (`book_to_txt.py`)**:
    - Extracts and cleans text from a book file (e.g., `book.epub`).
    - Normalizes special characters, fixes line breaks, and corrects formatting issues such as unterminated quotes or incomplete lines.
-   - Extracts the main content between specified markers (e.g., "PROLOGUE" and "ABOUT THE AUTHOR").
    - Outputs the cleaned text to `converted_book.txt`.
 
 2. **Character Identification and Metadata Generation (`identify_characters_and_output_book_to_jsonl.py`)**:
-   - Identifies characters in the text using Named Entity Recognition (NER) with the GLiNER model.
-   - Assigns gender and age scores to characters using an LLM via an OpenAI-compatible API.
+   - Step 1: Identifies unique characters and their age, gender in the text using an LLM via an OpenAI-compatible API.
+   - Step 2: Attributes the speakers identified in each line of text using the characters identified in step 1 using an LLM via an OpenAI-compatible API.
    - Outputs two files:
      - `speaker_attributed_book.jsonl`: Each line of text annotated with the identified speaker.
      - `character_gender_map.json`: Metadata about characters, including name, age, gender, and gender score.
@@ -31,7 +30,6 @@ Watch the demo video:
 3. **Emotion Tags Enhancement (`add_emotion_tags.py`)**:
    - Adds emotion tags (e.g., `<laugh>`, `<sigh>`, `<gasp>` etc.) to enhance narration expressiveness.
    - Processes `converted_book.txt` and outputs enhanced text to `tag_added_lines_chunks.txt`.
-   - Voice-agnostic: works with both single-voice and multi-voice audiobook generation.
    - Requires Orpheus TTS engine for emotion tag support.
 
 4. **Audiobook Generation (`generate_audiobook.py`)**:
@@ -53,7 +51,7 @@ Watch the demo video:
 - **Multi-Format Output Support**: Supports various output formats: AAC, M4A, MP3, WAV, OPUS, FLAC, PCM, M4B.
 - **Docker Support**: Use pre-built docker images/ build using docker compose to save time and for a smooth user experience. 
 - **Emotion Tags Addition**: Emotion tags which are supported in Orpheus TTS can be added to the book's text intelligently using an LLM to enhance character voice expression.
-- **Character Identification**: Identifies characters and infers their attributes (gender, age) using advanced NLP techniques and LLMs.
+- **Character Identification**: Identifies characters and infers their attributes (gender, age) then attributes speakers to each line of text using LLMs.
 - **Customizable Audiobook Narration**: Supports single-voice or multi-voice narration with narrator gender preference for enhanced listening experiences.
 - **Progress Tracking**: Includes progress bars and execution time measurements for efficient monitoring.
 - **Open Source**: Licensed under GPL v3.
@@ -81,7 +79,7 @@ Watch the demo video:
 ### Initial Setup
 - Install [Docker](https://www.docker.com/products/docker-desktop/)
 - Make sure host networking is enabled in your docker setup : https://docs.docker.com/engine/network/drivers/host/. Host networking is currently supported in Linux and in docker desktop. To use with [docker desktop, follow these steps](https://docs.docker.com/engine/network/drivers/host/#docker-desktop)
-- Set up your LLM and expose an OpenAI-compatible endpoint (e.g., using LM Studio with `qwen3-14b`).
+- Set up your LLM and expose an OpenAI-compatible endpoint (e.g., using LM Studio with `Qwen/Qwen3-30B-A3B-Instruct-2507`).
 - **Set up TTS Engine**: Choose between Kokoro or Orpheus TTS models:
 
    ### Option 1: Kokoro TTS (Recommended for most users)
@@ -130,9 +128,6 @@ Watch the demo video:
    <summary>Quickest Start (docker run)</summary>
 
    - Make sure your .env is configured correctly and your LLM and TTS engine (Kokoro/Orpheus) are running. In the same folder where .env is present, run the below command
-   - Choose between the types of inference:
-   
-      For CUDA based GPU inference (Apple Silicon GPUs currently not supported, use CPU based inference instead)
 
       ```bash
       docker run \
@@ -141,22 +136,10 @@ Watch the demo video:
          --network host \
          --gpus all \
          --env-file .env \
-         -v model_cache:/app/model_cache \
-         ghcr.io/prakharsr/audiobook_creator_gpu:v1.5
+         ghcr.io/prakharsr/audiobook_creator:v2.0
       ```
 
-      For CPU based inference
-
-      ```bash
-      docker run \
-         --name audiobook_creator \
-         --restart always \
-         --network host \
-         --env-file .env \
-         -v model_cache:/app/model_cache \
-         ghcr.io/prakharsr/audiobook_creator_cpu:v1.5
-      ```
-   - Wait for the models to download and then navigate to http://localhost:7860 for the Gradio UI
+   - Navigate to http://localhost:7860 for the Gradio UI
    </details>
 
    <details>
@@ -169,27 +152,14 @@ Watch the demo video:
       cd audiobook-creator
       ```
    - Make sure your .env is configured correctly and your LLM is running
-   - If TTS docker container Kokoro is already running, you can either stop and remove it or comment the kokoro_fastapi service and depends_on param in docker compose. If its not running then it will automatically start when you run docker compose up command
+   - For Kokoro TTS, please refer to the instructions mentioned before in Option 1
    - For Orpheus TTS, please refer to the [Orpheus TTS FastAPI repository](https://github.com/prakharsr/Orpheus-TTS-FastAPI) for setup instructions as it provides the optimal implementation.
    - Copy the .env file into the audiobook-creator folder
-   - Choose between the types of inference:
-   
-      For CUDA based GPU inference (Apple Silicon GPUs currently not supported, use CPU based inference instead). Choose the value of TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE based on [this guide](https://github.com/prakharsr/audiobook-creator/?tab=readme-ov-file#parallel-batch-inferencing-of-audio-for-faster-audio-generation) and set the value in kokoro_fastapi service and env variable.
-
-      ```bash
-      cd docker/gpu
-
-      docker compose up --build
+   -  Run using
       ```
-
-      For CPU based inference. In this case you can keep number of workers as 1 as only mostly GPU based inferencing benefits from parallel workers and batch requests.
-
-      ```bash
-      cd docker/cpu
-
-      docker compose up --build
+      docker compose --env-file .env up --build
       ```
-   - Wait for the models to download and then navigate to http://localhost:7860 for the Gradio UI
+   - Navigate to http://localhost:7860 for the Gradio UI
    </details>
 
    <details>
@@ -215,30 +185,29 @@ Watch the demo video:
       ```bash
       source .venv/bin/activate
       ```
-   6. Install Pip 24.0:
+   6. Install dependedncies:
       ```bash
-      uv pip install pip==24.0
+      uv pip install -r requirements.txt --no-deps
       ```
-   7. Install dependencies (choose CPU or GPU version):
-      ```bash
-      uv pip install -r requirements_cpu.txt
-      ```
-      ```bash
-      uv pip install -r requirements_gpu.txt
-      ```
-   8. Upgrade version of six to avoid errors:
-      ```bash
-      uv pip install --upgrade six==1.17.0
-      ```
-   9. Install [calibre](https://calibre-ebook.com/download) (Optional dependency, needed if you need better text decoding capabilities, wider compatibility and want to create M4B audiobook). Also make sure that calibre is present in your PATH. For MacOS, do the following to add it to the PATH:
+   7. Install [calibre](https://calibre-ebook.com/download) (Optional dependency, needed if you need better text decoding capabilities, wider compatibility and want to create M4B audiobook). Also make sure that calibre is present in your PATH. For MacOS, do the following to add it to the PATH:
       ```bash
       deactivate
       echo 'export PATH="/Applications/calibre.app/Contents/MacOS:$PATH"' >> .venv/bin/activate
       source .venv/bin/activate
       ```
-   10. Install [ffmpeg](https://www.ffmpeg.org/download.html) (Needed for audio output format conversion and if you want to create M4B audiobook)
-   11. In the activated virtual environment, run `uvicorn app:app --host 0.0.0.0 --port 7860` to run the Gradio app. After the app has started, navigate to `http://127.0.0.1:7860` in the browser.
+   8. Install [ffmpeg](https://www.ffmpeg.org/download.html) (Needed for audio output format conversion and if you want to create M4B audiobook)
+   9. In the activated virtual environment, run `uvicorn app:app --host 0.0.0.0 --port 7860` to run the Gradio app. After the app has started, navigate to `http://127.0.0.1:7860` in the browser.
    </details>
+
+### Context window size and parallel requests config for character identification and emotion tag addition
+
+#### For Character Identification Step
+
+- This step creates batches of data to identify unique characters and then attributes speakers to each line of text. So, this requires lots of context so I recommend having atleast 20,000 context window size for non-thinking models, you may require more context size if you're using a thinking model. Also, this step is sequential for maximum accuracy so you can use set parallel/ max-num-seqs/ max-running-requests to 1 in llama.cpp/ vllm/ sglang to reduce your memory footprint.
+
+#### For Emotion Tag Addition Step
+
+- This step intelligently identifies where emotion tag might be needed to be added and then creates small batches to send to LLM which then returns the emotion tag added text. This step requires atleast 8192 context window with a thinking llm for each request. Also, this step can be parallelized since each batch is independent of each other, so you can make use of parallel/ max-num-seqs/ max-running-requests parameters in llama.cpp/ vllm/ sglang. Make sure that while using parallel param in llama.cpp, you also increase the context window size with the same factor since in llama.cpp, the context is split for each parallel request. So, if you're setting parallel to 8 in llama.cpp then set context size to 8 x 8192 = 65536. 
 
 ### Parallel batch inferencing of audio for faster audio generation
 
@@ -262,6 +231,7 @@ Watch the demo video:
 Planned future enhancements:
 
 -  ⏳ Add support for choosing between various languages which are currently supported by Kokoro and Orpheus.
+-  ✅ Remove Gliner NLP pipeline for character identification and build two step LLM based character identification pipeline for maximum accuracy.
 -  ✅ Process text and add emotion tags to the text in Orpheus TTS to enhance character voice expression
 -  ✅ Add support for [Orpheus](https://github.com/canopyai/Orpheus-TTS). Orpheus supports 
 emotion tags for a more immersive listening experience.

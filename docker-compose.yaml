@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  audiobook_creator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: audiobook_creator
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    restart: always
+    network_mode: host

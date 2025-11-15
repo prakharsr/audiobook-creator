@@ -3,7 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Copy requirements file first (for better caching)
-COPY requirements_gpu.txt .
+COPY requirements.txt .
 
 # Install necessary dependencies, including FFmpeg, Calibre, and OpenGL libraries
 RUN apt-get update && apt-get install -y \
@@ -20,9 +20,6 @@ RUN apt-get update && apt-get install -y \
 # Install uv package manager
 RUN pip install uv
 
-# Install pip 24.0 first
-RUN uv pip install --system --no-cache-dir --upgrade pip==24.0
-
 # Install Calibre
 RUN curl -sS https://download.calibre-ebook.com/linux-installer.sh | sh /dev/stdin
 
@@ -34,10 +31,7 @@ RUN ln -s /opt/calibre/ebook-convert /usr/local/bin/ebook-convert && \
 ENV PYTHONPATH=/app
 
 # Install Python dependencies (after upgrading pip)
-RUN uv pip install --system --no-cache-dir -r requirements_gpu.txt
-
-# Fix six package version
-RUN uv pip install --system --no-cache-dir --upgrade six==1.17.0
+RUN uv pip install --system --no-cache-dir --no-deps -r requirements.txt
 
 # Copy the rest of the application files
 COPY . .
