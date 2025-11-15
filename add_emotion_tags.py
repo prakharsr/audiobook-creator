@@ -18,14 +18,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
 import asyncio
-from utils.add_emotion_tags_to_text import add_tags_to_text_chunks
+from utils.add_emotion_tags_to_text import add_tags_to_text_chunks, process_emotion_tags_for_jsonl_data
+from utils.file_utils import read_jsonl
 from dotenv import load_dotenv
 
 load_dotenv()
 
 TTS_MODEL = os.environ.get("TTS_MODEL", "kokoro")
 
-async def process_emotion_tags():
+async def process_emotion_tags(characters_identified):
     """
     Process emotion tags for book text enhancement.
     
@@ -47,20 +48,30 @@ async def process_emotion_tags():
         yield "❌ No converted book found. Please extract text first."
         return
     
+    print(f"Characters identified value: {characters_identified}")
+    
     try:
-        # Read the converted book text
-        with open("converted_book.txt", "r", encoding='utf-8') as f:
-            text = f.read()
-        
-        if not text.strip():
-            yield "❌ Converted book file is empty."
-            return
-        
+        jsonl = []
+        if characters_identified:
+            print("Characters identified. Reading speaker attributed book JSONL file...")
+            jsonl = read_jsonl("speaker_attributed_book.jsonl")
+        else:
+            print("Characters not identified. Reading converted book text...")
+            # Read the converted book text
+            with open("converted_book.txt", "r", encoding='utf-8') as f:
+                text = f.read()
+
+                for line in text.split("\n"):
+                    jsonl.append({
+                        "line": line,
+                        "speaker": "narrator"
+                    })
+
         yield f"🎭 Adding emotion tags to the book text..."
         yield "📖 Loaded book text for emotion enhancement"
         
         # Process the text with emotion tags
-        async for progress in add_tags_to_text_chunks(text):
+        async for progress in process_emotion_tags_for_jsonl_data(jsonl):
             yield progress
         
         yield "✅ Emotion tags processing completed successfully!"

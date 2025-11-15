@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 import random
 import asyncio
 from openai import AsyncOpenAI
+import traceback
 import re
 
 load_dotenv()
@@ -30,8 +31,8 @@ NO_THINK_MODE = os.environ.get("NO_THINK_MODE", "true")
 
 # Retry configuration
 MAX_RETRIES = 3
-BASE_DELAY = 1.0  # Base delay in seconds
-MAX_DELAY = 60.0  # Maximum delay in seconds
+BASE_DELAY = 0.1  # Base delay in seconds
+MAX_DELAY = 10  # Maximum delay in seconds
 
 def clean_thinking_tags(response_text):
     """
@@ -48,6 +49,9 @@ def clean_thinking_tags(response_text):
     
     # Remove <think>...</think> blocks (including multiline)
     cleaned = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL)
+    
+    # Remove content before closing </think> tag if opening tag is missing
+    cleaned = re.sub(r'^.*?</think>', '', cleaned, flags=re.DOTALL)
     
     # Remove any remaining standalone thinking tags
     cleaned = re.sub(r'</?think>', '', cleaned)
@@ -123,25 +127,11 @@ async def generate_audio_with_retry(client: AsyncOpenAI, tts_model: str, text_to
             return audio_buffer
             
         except Exception as e:
+            traceback.print_exc()
+            print(f"Error: {e}")
             last_exception = e
-            
-            # Check if this is a connection-related error
-            connection_errors = [
-                "connection",
-                "timeout",
-                "network",
-                "request",
-                "http",
-                "server",
-                "api",
-                "rate",
-                "limit"
-            ]
-            
-            error_message = str(e).lower()
-            is_connection_error = any(error_keyword in error_message for error_keyword in connection_errors)
-            
-            if attempt < max_retries and is_connection_error:
+                        
+            if attempt < max_retries:
                 # Calculate delay with exponential backoff and jitter
                 delay = min(BASE_DELAY * (2 ** attempt), MAX_DELAY)
                 # Add jitter to prevent thundering herd

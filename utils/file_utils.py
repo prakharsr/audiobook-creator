@@ -65,6 +65,25 @@ def read_json(filename):
 
         return data
 
+def read_jsonl(filename):
+    """
+    Reads a JSONL file and returns a list of JSON objects.
+    
+    Args:
+        filename (str): The name of the JSONL file to read.
+        
+    Returns:
+        list[dict]: A list of dictionaries representing the JSON objects from the file.
+    """
+    data = []
+    with open(filename, 'r', encoding='utf-8') as file:
+        for line in file:
+            line = line.strip()
+            if line:  # Skip empty lines
+                data.append(json.loads(line))
+    return data
+
+
 def write_json_to_file(data, file_name):
     """
     Writes a JSON object to a file.
