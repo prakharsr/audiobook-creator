@@ -150,7 +150,6 @@ Watch the demo video:
          --name audiobook_creator \
          --restart always \
          --network host \
-         --gpus all \
          --env-file .env \
          ghcr.io/prakharsr/audiobook_creator:v2.0
       ```
