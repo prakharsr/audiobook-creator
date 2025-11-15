@@ -124,8 +124,7 @@ Watch the demo video:
    ```
 - After this, choose between the below options for the next step to run the audiobook creator app: 
 
-   <details>
-   <summary>Quickest Start (docker run)</summary>
+   **Quickest Start (docker run)**
 
    - Make sure your .env is configured correctly and your LLM and TTS engine (Kokoro/Orpheus) are running. In the same folder where .env is present, run the below command
 
@@ -140,7 +139,6 @@ Watch the demo video:
       ```
 
    - Navigate to http://localhost:7860 for the Gradio UI
-   </details>
 
    <details>
    <summary>Quick Start (docker compose)</summary>
@@ -199,7 +197,13 @@ Watch the demo video:
    9. In the activated virtual environment, run `uvicorn app:app --host 0.0.0.0 --port 7860` to run the Gradio app. After the app has started, navigate to `http://127.0.0.1:7860` in the browser.
    </details>
 
+
 ### Context window size and parallel requests config for character identification and emotion tag addition
+
+<details>
+<summary>
+Expand to view
+</summary>
 
 #### For Character Identification Step
 
@@ -209,9 +213,16 @@ Watch the demo video:
 
 - This step intelligently identifies where emotion tag might be needed to be added and then creates small batches to send to LLM which then returns the emotion tag added text. This step requires atleast 8192 context window with a thinking llm for each request. Also, this step can be parallelized since each batch is independent of each other, so you can make use of parallel/ max-num-seqs/ max-running-requests parameters in llama.cpp/ vllm/ sglang. Make sure that while using parallel param in llama.cpp, you also increase the context window size with the same factor since in llama.cpp, the context is split for each parallel request. So, if you're setting parallel to 8 in llama.cpp then set context size to 8 x 8192 = 65536. 
 
+</details>
+
 ### Parallel batch inferencing of audio for faster audio generation
 
-- Choose the value of **TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE** based on your available VRAM to accelerate the generation of audio by using parallel batch inferencing. This variable defines the max number of parallel requests that can be made to TTS FastAPI for faster audio generation.
+<details>
+<summary>
+Expand to view
+</summary>
+
+Choose the value of **TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE** based on your available VRAM to accelerate the generation of audio by using parallel batch inferencing. This variable defines the max number of parallel requests that can be made to TTS FastAPI for faster audio generation.
 
 #### For Kokoro TTS:
 - This variable is used while setting up the number of workers in Kokoro docker container and as an env variable, so make sure you set the same values for both of them. 
@@ -225,6 +236,8 @@ Watch the demo video:
 - **Recommended values**: Start with 4-8 for most setups. Higher values (8-16) can be used with sufficient VRAM and GPU processing power.
 - The server automatically handles intelligent text chunking and parallel token generation, providing optimal performance without manual tuning.
 - For specific configuration and optimization guidance, refer to the [Orpheus TTS FastAPI repository](https://github.com/prakharsr/Orpheus-TTS-FastAPI) documentation.
+
+</details>
 
 ## Roadmap
 
