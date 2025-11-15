@@ -57,6 +57,11 @@ def sanitize_filename(text):
     text = text.replace(':', '').replace('?', '').replace('\\', '').replace('|', '')
     text = text.replace('*', '').replace('<', '').replace('>', '').replace('&', 'and')
     
+    # cleanup file name based on pattern in run_shell_command_secure
+    # ^[a-zA-Z0-9\-_./]+$
+    regex = r"[^a-zA-Z0-9\-_./\s]"
+    text = re.sub(regex, ' ', text, 0, re.MULTILINE) 
+    
     # Normalize whitespace and trim
     text = ' '.join(text.split())
     
@@ -1004,7 +1009,7 @@ async def main():
         print("\n⚠️ Invalid option! Please restart and enter either **1** or **2**.")
         return
 
-    print(f"\n🎧 Audiobook is generated ! The audiobook is saved as **audiobook.{"m4b" if generate_m4b_audiobook_file else output_format}** in the **generated_audiobooks** directory in the current folder.")
+    print(f"\n🎧 Audiobook is generated ! The audiobook is saved as **audiobook.{'m4b' if generate_m4b_audiobook_file else output_format}** in the **generated_audiobooks** directory in the current folder.")
 
     end_time = time.time()
 

@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import subprocess
 import shutil
 import os
+import sys
 import traceback
 import shlex
 import re
@@ -68,12 +69,12 @@ def validate_file_path_allowlist(file_path):
         return False
     
     # Allowlist pattern for safe file paths
-    # Allows: letters, numbers, spaces, hyphens, underscores, dots, forward slashes
+    # Allows: letters, numbers, spaces, hyphens, underscores, dots, forward slashes, commas
     # Specifically excludes shell metacharacters and command injection patterns
-    safe_path_pattern = r"^[a-zA-Z0-9\s\-_.:/'\\]+\.[a-zA-Z0-9]{1,10}$|^[a-zA-Z0-9\s\-_.:/'\\]+/$"
+    safe_path_pattern = r"^[a-zA-Z0-9\s\-_.:/'\\,]+\.[a-zA-Z0-9]{1,10}$|^[a-zA-Z0-9\s\-_.:/'\\,]+/$"
     
     # Additional check for relative path traversal
-    safe_relative_pattern = r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\]+$"
+    safe_relative_pattern = r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\,]+$"
     
     return (re.match(safe_path_pattern, file_path) is not None and 
             re.match(safe_relative_pattern, file_path) is not None)
@@ -102,9 +103,9 @@ def validate_command_arguments_allowlist(args):
         # Allow safe argument patterns:
         safe_arg_patterns = [
             # File paths and extensions (no '..')
-            r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\]+\.[a-zA-Z0-9]{1,10}$",
+            r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\,]+\.[a-zA-Z0-9]{1,10}$",
             # Directory paths (no '..')
-            r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\]+/?$",
+            r"^(?!.*\.\.)[a-zA-Z0-9\s\-_.:/'\\,]+/?$",
             # Command flags like -y, --verbose, -map_metadata
             r'^-{1,2}[a-zA-Z0-9\-_:]+$',
             # Numbers with optional size suffixes and standalone numbers
@@ -167,10 +168,11 @@ def validate_command_safety(command):
         r'^/usr/local/bin/[a-zA-Z0-9\-_]+$',  # Local installation paths
         r'^/opt/[a-zA-Z0-9\-_.]+/[a-zA-Z0-9\-_./]+$',  # /opt/ installations
         r'^/Applications/[a-zA-Z0-9\-_.]+\.app/Contents/MacOS/[a-zA-Z0-9\-_]+$',  # macOS app bundles
+        r'^C:\\Program Files\\[a-zA-Z0-9\-_.]+\\[a-zA-Z0-9\-_]+\.exe$',  # windows installations
     ]
     
     # Check if command name matches any safe pattern
-    is_safe_command = any(re.match(pattern, command_name) for pattern in safe_command_patterns)
+    is_safe_command = any(re.match(pattern, command_name, re.IGNORECASE) for pattern in safe_command_patterns)
     
     if not is_safe_command:
         return False
@@ -212,6 +214,9 @@ def run_shell_command_secure(command, allowed_commands=None):
             command_name = cmd_parts[0]
             # Extract basename from full path for comparison
             command_basename = os.path.basename(command_name)
+            # if on windows strip off .exe to compare
+            if sys.platform == 'win32' and command_basename.lower().endswith(".exe"):
+                command_basename = command_basename[:-4]
             
             if command_basename not in allowed_commands:
                 raise ValueError(f"Command '{command_basename}' not in allowed commands list")

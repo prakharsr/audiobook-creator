@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     libegl1 \
     libopengl0 \
     libxcb-cursor0 \
+    libnss3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv package manager

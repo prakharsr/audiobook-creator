@@ -1050,7 +1050,8 @@ async def add_tags_to_text_chunks(text_to_process):
         with open("tag_added_lines_chunks.txt", "w") as f:
             f.write(enhanced_text)
         yield f"Emotion tags processing completed. Output written to tag_added_lines_chunks.txt"
-        yield f"Line count verification: Filtered={len(non_empty_lines)}, Enhanced={len(enhanced_text.split('\n'))}"
+        enhanced_text_split = enhanced_text.split('\n')
+        yield f"Line count verification: Filtered={len(non_empty_lines)}, Enhanced={len(enhanced_text_split)}"
     except IOError as e:
         yield f"Error writing output file: {e}"
         traceback.print_exc()
