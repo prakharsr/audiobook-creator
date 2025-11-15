@@ -22,7 +22,7 @@ import traceback
 from fastapi import FastAPI
 from book_to_txt import process_book_and_extract_text, save_book
 from identify_characters_and_output_book_to_jsonl import process_book_and_identify_characters
-from generate_audiobook import process_audiobook_generation, validate_book_for_m4b_generation
+from generate_audiobook import process_audiobook_generation, validate_book_for_m4b_generation, sanitize_filename
 from add_emotion_tags import process_emotion_tags
 from dotenv import load_dotenv
 
@@ -41,6 +41,8 @@ def validate_book_upload(book_file, book_title):
     
     if not book_title:
         book_title = os.path.splitext(os.path.basename(book_file.name))[0]
+
+    book_title = sanitize_filename(book_title)
     
     yield book_title
     return gr.Info(f"Book '{book_title}' ready for processing.", duration=5)
