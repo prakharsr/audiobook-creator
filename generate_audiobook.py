@@ -57,6 +57,11 @@ def sanitize_filename(text):
     text = text.replace(':', '').replace('?', '').replace('\\', '').replace('|', '')
     text = text.replace('*', '').replace('<', '').replace('>', '').replace('&', 'and')
     
+    # cleanup file name based on pattern in run_shell_command_secure
+    # ^[a-zA-Z0-9\-_./]+$
+    regex = r"[^a-zA-Z0-9\-_./\s]"
+    text = re.sub(regex, ' ', text, 0, re.MULTILINE) 
+    
     # Normalize whitespace and trim
     text = ' '.join(text.split())
     
