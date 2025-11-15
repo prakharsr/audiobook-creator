@@ -83,6 +83,12 @@ Watch the demo video:
 - **Set up TTS Engine**: Choose between Kokoro or Orpheus TTS models:
 
    ### Option 1: Kokoro TTS (Recommended for most users)
+
+   <details>
+   <summary>
+   Expand to view
+   </summary>
+
    Set up the Kokoro TTS model via [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI). To get started, run the docker image using the following command:
 
    For CUDA based GPU inference (Apple Silicon GPUs currently not supported, use CPU based inference instead). Choose the value of TTS_MAX_PARALLEL_REQUESTS_BATCH_SIZE based on [this guide](https://github.com/prakharsr/audiobook-creator/?tab=readme-ov-file#parallel-batch-inferencing-of-audio-for-faster-audio-generation)
@@ -110,13 +116,24 @@ Watch the demo video:
     --workers 1
    ```
 
+   </details>
+
    ### Option 2: Orpheus TTS (High-Quality and More Expressive Audio and Support for Emotion Tags)
+
+   <details>
+   <summary>
+   Expand to view
+   </summary>
+
    Experience premium audio quality with the Orpheus TTS FastAPI server featuring vLLM backend and bfloat16/ float16/ float32 precision. Set up Orpheus TTS using my dedicated [Orpheus TTS FastAPI](https://github.com/prakharsr/Orpheus-TTS-FastAPI) repository.
 
    **IMPORTANT:** Choose only highest possible precision (bf16/ fp16/ fp32) and this vLLM based FastAPI server as I noticed that using quantized versions of Orpheus or even using float16 GGUF with llama.cpp gave me audio quality issues and artifacts (repeated lines in audio/ extended audio with no spoken text but weird noises/ audio hallucinations/ infinite audio looping/ some other issues). The linked repository for FastAPI server also has some additional improvements to fix such issues by detecting decoding errors, infinite audio loops and having a retry mechanism which tries to fix these audio issues automatically. 
 
    **Setup Instructions:**
    Please follow the complete setup instructions from the [Orpheus TTS FastAPI repository](https://github.com/prakharsr/Orpheus-TTS-FastAPI) as it contains all the necessary configuration details, installation steps, and optimization guides.
+
+   </details>
+<br/>
 
 - Create a .env file from .env_sample and configure it with the correct values. Make sure you follow the instructions mentioned at the top of .env_sample to avoid errors.
    ```bash
