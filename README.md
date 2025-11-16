@@ -236,7 +236,7 @@ Expand to view
 Based on user experience and testing, these are the suggested models to use if you have enough VRAM and get acceptable tokens/second :
 
 - **For Character Identification**: Qwen3 30B A3B Instruct (without thinking) works well and provides good results for identifying characters and attributing speakers to dialogue lines. Interestingly, gpt-oss-20B with thinking did not perform as well for character identification.
-- **For Emotion Tagging**: gpt-oss-20B works better than Qwen3 30B A3B Instruct for adding emotion tags to enhance narration expressiveness. I
+- **For Emotion Tagging**: Gpt-oss-20B with thinking works better than Qwen3 30B A3B Instruct for adding emotion tags to enhance narration expressiveness.
 
 Users can experiment with different models for each pipeline step to find what works best for their specific use case.
 
