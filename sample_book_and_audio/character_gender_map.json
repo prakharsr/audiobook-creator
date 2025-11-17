@@ -16,37 +16,50 @@
             "name": "narrator",
             "age": "adult",
             "gender": "female",
-            "gender_score": 0
+            "gender_score": 0,
+            "description": "The narrator of the story"
+        },
+        "unknown": {
+            "name": "unknown",
+            "age": "adult",
+            "gender": "unknown",
+            "gender_score": 5,
+            "description": "Unknown or ambiguous speaker"
         },
         "mia": {
             "name": "mia",
-            "age": "child",
+            "age": "adult",
             "gender": "female",
-            "gender_score": 10
+            "gender_score": 8,
+            "description": "The brave and curious leader of the group, who finds the treasure map in her attic and takes charge of the adventure. She is courageous and decisive."
         },
         "sam": {
             "name": "sam",
-            "age": "child",
+            "age": "adult",
             "gender": "male",
-            "gender_score": 4
+            "gender_score": 4,
+            "description": "The clever inventor of the group, known for his intelligence and use of tools like glasses and a flashlight. He is analytical and detail-oriented."
         },
         "ellie": {
             "name": "ellie",
-            "age": "child",
+            "age": "adult",
             "gender": "female",
-            "gender_score": 9
+            "gender_score": 9,
+            "description": "The animal lover of the group, who shows affection for rabbits and is emotionally expressive. She values kindness and connection with nature."
         },
         "jack": {
             "name": "jack",
-            "age": "child",
+            "age": "adult",
             "gender": "male",
-            "gender_score": 3
+            "gender_score": 1,
+            "description": "The strong and loyal friend of the group, who offers protection and reassurance. He is physically capable and dependable."
         },
         "luna": {
             "name": "luna",
-            "age": "child",
+            "age": "adult",
             "gender": "female",
-            "gender_score": 8
+            "gender_score": 10,
+            "description": "The dreamy artist of the group, who expresses herself through sketching and storytelling. She is imaginative and reflective."
         }
     }
 }

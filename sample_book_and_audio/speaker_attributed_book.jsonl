@@ -1,34 +1,56 @@
 {"speaker": "narrator", "line": "The Adventure of the Lost Treasure"}
 {"speaker": "narrator", "line": "Chapter 1: The Mysterious Map"}
 {"speaker": "narrator", "line": "One sunny morning in the small village of Willowbrook, five friends gathered under their favorite oak tree. There was Mia, the brave and curious leader; Sam, the clever inventor; Ellie, the animal lover; Jack, the strong and loyal friend; and Luna, the dreamy artist."}
-{"speaker": "mia", "line": "Mia held up a dusty, old map she had found in her attic. \"Look what I found! It's a treasure map!\""}
-{"speaker": "sam", "line": "Sam adjusted his glasses and peered at the map. \"This looks real. See these symbols? They could be clues!\""}
-{"speaker": "ellie", "line": "Ellie's eyes sparkled with excitement. \"Do you think we'll find gold? Or maybe even a hidden cave?\""}
-{"speaker": "jack", "line": "Jack flexed his arms playfully. \"Whatever it is, I'll protect us from any danger!\""}
-{"speaker": "luna", "line": "Luna, who was sketching the map in her notebook, smiled. \"This is going to be the best adventure ever.\""}
+{"speaker": "narrator", "line": "Mia held up a dusty, old map she had found in her attic."}
+{"speaker": "mia", "line": "\"Look what I found! It's a treasure map!\""}
+{"speaker": "narrator", "line": "Sam adjusted his glasses and peered at the map."}
+{"speaker": "sam", "line": "\"This looks real. See these symbols? They could be clues!\""}
+{"speaker": "narrator", "line": "Ellie's eyes sparkled with excitement."}
+{"speaker": "ellie", "line": "\"Do you think we'll find gold? Or maybe even a hidden cave?\""}
+{"speaker": "narrator", "line": "Jack flexed his arms playfully."}
+{"speaker": "jack", "line": "\"Whatever it is, I'll protect us from any danger!\""}
+{"speaker": "narrator", "line": "Luna, who was sketching the map in her notebook, smiled."}
+{"speaker": "luna", "line": "\"This is going to be the best adventure ever.\""}
 {"speaker": "narrator", "line": "Chapter 2: Into the Forest"}
 {"speaker": "narrator", "line": "The friends packed their backpacks with snacks, water, and a flashlight, then set off into the forest. The map led them through tall trees, across a babbling brook, and up a steep hill."}
-{"speaker": "ellie", "line": "As they walked, Ellie spotted a family of rabbits. \"Aww, look at them! They're so cute!\""}
-{"speaker": "sam", "line": "Sam pointed to the map. \"We need to follow the trail marked by the red X. It should be just beyond these trees.\""}
-{"speaker": "jack", "line": "Suddenly, Jack stopped. \"Do you hear that? It sounds like… growling.\""}
-{"speaker": "mia", "line": "Mia stepped forward bravely. \"Don't worry, it's probably just the wind. Let's keep going.\""}
+{"speaker": "narrator", "line": "As they walked, Ellie spotted a family of rabbits."}
+{"speaker": "ellie", "line": "\"Aww, look at them! They're so cute!\""}
+{"speaker": "narrator", "line": "Sam pointed to the map."}
+{"speaker": "sam", "line": "\"We need to follow the trail marked by the red X. It should be just beyond these trees.\""}
+{"speaker": "narrator", "line": "Suddenly, Jack stopped."}
+{"speaker": "jack", "line": "\"Do you hear that? It sounds like... growling.\""}
+{"speaker": "narrator", "line": "Mia stepped forward bravely."}
+{"speaker": "mia", "line": "\"Don't worry, it's probably just the wind. Let's keep going.\""}
 {"speaker": "narrator", "line": "Chapter 3: The Hidden Cave"}
-{"speaker": "luna", "line": "After hours of hiking, they reached a rocky cliff. Luna noticed something unusual. \"Look! There's a small opening behind those vines. Could that be the cave?\""}
-{"speaker": "sam", "line": "Sam pulled out his flashlight. \"Only one way to find out.\""}
+{"speaker": "narrator", "line": "After hours of hiking, they reached a rocky cliff. Luna noticed something unusual."}
+{"speaker": "luna", "line": "\"Look! There's a small opening behind those vines. Could that be the cave?\""}
+{"speaker": "narrator", "line": "Sam pulled out his flashlight."}
+{"speaker": "sam", "line": "\"Only one way to find out.\""}
 {"speaker": "narrator", "line": "The friends carefully made their way inside the dark cave. The walls were covered in glowing moss, and the air felt cool and damp."}
-{"speaker": "ellie", "line": "Ellie whispered, \"It's kind of spooky in here.\""}
-{"speaker": "jack", "line": "Jack grinned. \"Don't worry, Ellie. I've got your back.\""}
+{"speaker": "narrator", "line": "Ellie whispered,"}
+{"speaker": "ellie", "line": "\"It's kind of spooky in here.\""}
+{"speaker": "narrator", "line": "Jack grinned."}
+{"speaker": "jack", "line": "\"Don't worry, Ellie. I've got your back.\""}
 {"speaker": "narrator", "line": "Chapter 4: The Treasure"}
-{"speaker": "narrator", "line": "Deep inside the cave, they found a large wooden chest. Mia's hands trembled as she opened it. Inside were not gold or jewels, but something even more special\u2014an old book filled with stories, drawings, and maps of the village from long ago."}
-{"speaker": "luna", "line": "Luna gasped. \"This is amazing! It's like a piece of history.\""}
-{"speaker": "sam", "line": "Sam flipped through the pages. \"Look, there's even a note from the person who hid it. It says, 'To those who find this, may your curiosity and friendship guide you to many more adventures.'\""}
-{"speaker": "ellie", "line": "Ellie smiled. \"This is better than treasure. It's a gift from the past.\""}
-{"speaker": "jack", "line": "Jack nodded. \"And we found it together.\""}
+{"speaker": "narrator", "line": "Deep inside the cave, they found a large wooden chest. Mia's hands trembled as she opened it. Inside were not gold or jewels, but something even more special-an old book filled with stories, drawings, and maps of the village from long ago."}
+{"speaker": "narrator", "line": "Luna gasped."}
+{"speaker": "luna", "line": "\"This is amazing! It's like a piece of history.\""}
+{"speaker": "narrator", "line": "Sam flipped through the pages."}
+{"speaker": "sam", "line": "\"Look, there's even a note from the person who hid it. It says, 'To those who find this, may your curiosity and friendship guide you to many more adventures.'\""}
+{"speaker": "narrator", "line": "Ellie smiled."}
+{"speaker": "ellie", "line": "\"This is better than treasure. It's a gift from the past.\""}
+{"speaker": "narrator", "line": "Jack nodded."}
+{"speaker": "jack", "line": "\"And we found it together.\""}
 {"speaker": "narrator", "line": "Chapter 5: A New Beginning"}
 {"speaker": "narrator", "line": "The friends returned to the village, carrying the chest with them. They decided to share the book with everyone, so the whole village could learn about its history."}
-{"speaker": "mia", "line": "As they sat under the oak tree that evening, Mia said, \"This was the best adventure ever. But you know what? I think there are more treasures out there waiting to be found.\""}
-{"speaker": "sam", "line": "Sam grinned. \"And more mysteries to solve.\""}
-{"speaker": "ellie", "line": "Ellie added, \"And more animals to meet!\""}
-{"speaker": "jack", "line": "Jack flexed his arms again. \"And more adventures to protect you all on.\""}
-{"speaker": "luna", "line": "Luna closed her sketchbook. \"And more stories to tell.\""}
+{"speaker": "narrator", "line": "As they sat under the oak tree that evening, Mia said,"}
+{"speaker": "mia", "line": "\"This was the best adventure ever. But you know what? I think there are more treasures out there waiting to be found.\""}
+{"speaker": "narrator", "line": "Sam grinned."}
+{"speaker": "sam", "line": "\"And more mysteries to solve.\""}
+{"speaker": "narrator", "line": "Ellie added,"}
+{"speaker": "ellie", "line": "\"And more animals to meet!\""}
+{"speaker": "narrator", "line": "Jack flexed his arms again."}
+{"speaker": "jack", "line": "\"And more adventures to protect you all on.\""}
+{"speaker": "narrator", "line": "Luna closed her sketchbook."}
+{"speaker": "luna", "line": "\"And more stories to tell.\""}
 {"speaker": "narrator", "line": "The five friends laughed, knowing that no matter what, they would always have each other and their next great adventure."}
