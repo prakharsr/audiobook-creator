@@ -40,9 +40,10 @@ def get_available_voices():
     try:
         response = requests.get(f"{TTS_BASE_URL}/audio/voices")
         voices_res = response.json()
-        voices = voices_res["voices"]
-        # print("Available voices:", voices)
-        return voices
+        # Kokoro-FastAPI v0.4.0+ returns [{"id": "...", "name": "..."}];
+        # earlier versions returned plain strings. Normalize to ids so the
+        # combinations/join downstream keeps working.
+        return [v["id"] if isinstance(v, dict) else v for v in voices_res["voices"]]
     except Exception as e:
         print(f"Error fetching voices: {e}")
         return []
